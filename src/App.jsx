@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createWorker } from "tesseract.js";
 import {
   AlertTriangle,
   MapPin,
