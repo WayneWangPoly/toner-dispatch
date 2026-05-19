@@ -576,11 +576,22 @@ useEffect(() => {
     }
 
     if (field === "suburb") {
-      const defaults = suburbDefaults[normalizeSuburb(value)];
+      const suburbKey = normalizeSuburb(value);
+      const defaults = suburbDefaults[suburbKey];
+
       if (defaults) {
+        next.suburb = value
+          .trim()
+          .split(" ")
+          .filter(Boolean)
+           .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+          .join(" ");
+
         next.direction = defaults.direction;
         next.lat = String(defaults.lat);
         next.lng = String(defaults.lng);
+      } else {
+        next.suburb = value;
       }
     }
     setForm(next);
