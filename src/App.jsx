@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-import LoginScreen from "./components/LoginScreen";
 import { AlertTriangle, MapPin, Navigation, Package, Plus, Search, UserCheck, X } from "lucide-react";
+import { supabase } from "./lib/supabaseClient";
+import LoginScreen from "./components/LoginScreen";
 
 const getEnv = (key) => {
   try {
