@@ -1462,6 +1462,98 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
   );
 }
 
+function extractDocketFieldsFromText(text = "") {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const fullText = lines.join("\n");
+
+  function matchOne(patterns) {
+    for (const pattern of patterns) {
+      const match = fullText.match(pattern);
+      if (match?.[1]) return match[1].trim();
+    }
+    return "";
+  }
+
+  const docket_no = matchOne([
+    /docket\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
+    /(?:delivery|dispatch)\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9\-]+)/i,
+    /\b(AN\d{6,})\b/i,
+  ]);
+
+  const equipment_id = matchOne([
+    /equipment\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
+    /machine\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
+    /\b(IC[A-Z0-9\-]{4,}|IR[A-Z0-9\-]{4,}|HP[A-Z0-9\-]{4,})\b/i,
+  ]);
+
+  const toner_code = matchOne([
+    /(?:toner|product|item|code)\s*(?:code|no|number)?\s*[:\-]?\s*([A-Z0-9\- ]{3,30})/i,
+    /\b(WT-[A-Z0-9]+)\b/i,
+    /\b(W\d{4,}[A-Z]{0,3})\b/i,
+  ]);
+
+  let customer_name = matchOne([
+    /deliver\s*to\s*[:\-]?\s*(.+)/i,
+    /customer\s*[:\-]?\s*(.+)/i,
+    /client\s*[:\-]?\s*(.+)/i,
+  ]);
+
+  let street_address = matchOne([
+    /address\s*[:\-]?\s*(.+)/i,
+  ]);
+
+  let suburb = "";
+  let postcode = "";
+  let state = "SA";
+  let country = "Australia";
+
+  const postcodeLine = lines.find((line) =>
+    /\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+\d{4}\b/i.test(line)
+  );
+
+  if (postcodeLine) {
+    const m = postcodeLine.match(/(.+?)\s+\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+(\d{4})\b/i);
+    if (m) {
+      suburb = m[1].trim();
+      state = m[2].toUpperCase();
+      postcode = m[3];
+    }
+  }
+
+  if (!street_address) {
+    const possibleAddress = lines.find((line) =>
+      /^\d+\s+[A-Za-z]/.test(line) &&
+      /(road|rd|street|st|avenue|ave|drive|dr|court|ct|terrace|tce|highway|hwy|lane|ln)/i.test(line)
+    );
+    street_address = possibleAddress || "";
+  }
+
+  if (!customer_name) {
+    const deliverIndex = lines.findIndex((line) => /deliver\s*to/i.test(line));
+    if (deliverIndex >= 0 && lines[deliverIndex + 1]) {
+      customer_name = lines[deliverIndex + 1];
+    }
+  }
+
+  return {
+    docket_no,
+    equipment_id: equipment_id.toUpperCase(),
+    customer_name,
+    street_address,
+    suburb,
+    state,
+    postcode,
+    country,
+    toner_code: toner_code.trim(),
+    priority: "Normal",
+    notes: `OCR text:\n${fullText.slice(0, 1200)}`,
+  };
+}
+
 function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
   const [imageName, setImageName] = useState("");
   const [imageBase64, setImageBase64] = useState("");
@@ -1485,45 +1577,41 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
   }
 
   async function recogniseDocket() {
-    if (!imageBase64) {
-      setScanError("Please take or upload a docket photo first.");
-      return;
-    }
-
-    if (!supabase) {
-      setScanError("Supabase is not connected. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
-      return;
-    }
-
-    setBusy(true);
-    setScanError("");
-
-    const { data, error } = await supabase.functions.invoke("scan-docket", {
-      body: {
-        imageBase64,
-        mimeType,
-      },
-    });
-
-    setBusy(false);
-
-    if (error) {
-      setScanError(error.message || "Failed to scan docket.");
-      return;
-    }
-
-    if (data?.error) {
-      setScanError(data.error);
-      return;
-    }
-
-    if (!data?.data) {
-      setScanError("No extracted data returned.");
-      return;
-    }
-
-    onExtracted(data.data);
+  if (!preview) {
+    setScanError("Please take or upload a docket photo first.");
+    return;
   }
+
+  setBusy(true);
+  setScanError("");
+
+  try {
+    const worker = await createWorker("eng");
+
+    const result = await worker.recognize(preview);
+    await worker.terminate();
+
+    const rawText = result?.data?.text || "";
+
+    if (!rawText.trim()) {
+      setScanError("No text was recognised. Please retake the photo with better lighting.");
+      return;
+    }
+
+    const extracted = extractDocketFieldsFromText(rawText);
+
+    if (!extracted.equipment_id && !extracted.docket_no && !extracted.toner_code) {
+      setScanError("Text was recognised, but key fields were not found. Please use Manual Add.");
+      return;
+    }
+
+    onExtracted(extracted);
+  } catch (err) {
+    setScanError(err?.message || "OCR failed. Please try again or use Manual Add.");
+  } finally {
+    setBusy(false);
+  }
+}
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-slate-950/50 sm:items-center sm:justify-center">
