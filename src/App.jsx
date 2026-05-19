@@ -832,8 +832,18 @@ if (supabase && !session) {
             setShowAdd(true);
           }}
           onExtracted={(data) => {
-            const suburbKey = normalizeSuburb(data.suburb || "");
+            const suburbRaw = data.suburb || "";
+            const suburbKey = normalizeSuburb(suburbRaw);
             const defaults = suburbDefaults[suburbKey] || {};
+
+            const suburbDisplay = suburbRaw
+              ? suburbRaw
+                  .trim()
+                  .split(" ")
+                  .filter(Boolean)
+                  .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+                  .join(" ")
+              : "";
 
             setForm({
               ...emptyForm(),
@@ -842,17 +852,21 @@ if (supabase && !session) {
               customer_name: data.customer_name || "",
               address: data.street_address || "",
               street_address: data.street_address || "",
-              suburb: data.suburb || "",
-              state: data.state || "",
+              suburb: suburbDisplay,
+              state: data.state || "SA",
               postcode: data.postcode || "",
               country: data.country || "Australia",
               direction: defaults.direction || "",
               toner_code: data.toner_code || "",
               priority: data.priority || "Normal",
               notes: data.notes || "",
-              lat: defaults.lat ? String(defaults.lat) : "",
-              lng: defaults.lng ? String(defaults.lng) : "",
+              lat: defaults.lat != null ? String(defaults.lat) : "",
+              lng: defaults.lng != null ? String(defaults.lng) : "",
             });
+
+            setShowPhotoImport(false);
+            setShowAdd(true);
+          }}
 
             setShowPhotoImport(false);
             setShowAdd(true);
