@@ -827,13 +827,41 @@ if (supabase && !session) {
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">Loading dispatch data...</div>
         ) : tab === "Map" ? (
-          <MapView orders={visibleOrders} area={area} mapProvider={mapProvider} suppressNavigationPrompt={suppressNavigationPrompt} onTake={takeOrder} onDeliver={deliverOrder} onCourier={markCourier} />
-        ) : tab === "Mine" ? (
-          <MineView staff={staff} setStaff={setStaff} mapProvider={mapProvider} setMapProvider={setMapProvider} suppressNavigationPrompt={suppressNavigationPrompt} setSuppressNavigationPrompt={setSuppressNavigationPrompt} orders={visibleOrders} onTake={takeOrder} onDeliver={deliverOrder} onCourier={markCourier} />
+          <MapView
+            orders={visibleOrders}
+            area={area}
+            mapProvider={mapProvider}
+            suppressNavigationPrompt={suppressNavigationPrompt}
+            onTake={takeOrder}
+            onDeliver={deliverOrder}
+            onCourier={markCourier}
+            onDelete={deleteOrder}
+          />
+          <MineView
+            staff={staff}
+            setStaff={setStaff}
+            mapProvider={mapProvider}
+            setMapProvider={setMapProvider}
+            suppressNavigationPrompt={suppressNavigationPrompt}
+            setSuppressNavigationPrompt={setSuppressNavigationPrompt}
+            orders={visibleOrders}
+            onTake={takeOrder}
+            onDeliver={deliverOrder}
+            onCourier={markCourier}
+            onDelete={deleteOrder}
+          />
         ) : tab === "History" ? (
           <HistoryView orders={historyOrders} filters={historyFilters} setFilters={setHistoryFilters} />
         ) : (
-          <OrderList orders={visibleOrders} mapProvider={mapProvider} suppressNavigationPrompt={suppressNavigationPrompt} onTake={takeOrder} onDeliver={deliverOrder} onCourier={markCourier} />
+          <OrderList
+            orders={visibleOrders}
+            mapProvider={mapProvider}
+            suppressNavigationPrompt={suppressNavigationPrompt}
+            onTake={takeOrder}
+            onDeliver={deliverOrder}
+            onCourier={markCourier}
+            onDelete={deleteOrder}
+          />
         )}
       </main>
 
@@ -922,7 +950,7 @@ function BottomTab({ active, label, icon, onClick }) {
   );
 }
 
-function OrderList({ orders, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
+function OrderList({ orders, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier, onDelete }) {
   if (orders.length === 0) {
     return <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">No orders in this view.</div>;
   }
