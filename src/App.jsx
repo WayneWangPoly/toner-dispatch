@@ -823,7 +823,17 @@ if (supabase && !session) {
         </div>
       </nav>
 
-      {showAdd && <AddSheet form={form} updateForm={updateForm} addOrder={addOrder} close={() => setShowAdd(false)} />}
+      {showAdd && (
+        <AddSheet
+          form={form}
+          updateForm={updateForm}
+          addOrder={addOrder}
+          saving={savingOrder}
+          close={() => {
+            if (!savingOrder) setShowAdd(false);
+          }}
+        />
+      )}
       {showPhotoImport && (
         <PhotoImportSheet
           close={() => setShowPhotoImport(false)}
