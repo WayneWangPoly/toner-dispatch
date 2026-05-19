@@ -1719,7 +1719,15 @@ function MineView({
 
       <section>
         <h3 className="mb-2 px-1 text-sm font-black uppercase tracking-wider text-slate-500">My taken deliveries</h3>
-        <OrderList orders={orders} mapProvider={mapProvider} suppressNavigationPrompt={suppressNavigationPrompt} onTake={onTake} onDeliver={onDeliver} onCourier={onCourier} />
+        <OrderList
+          orders={orders}
+          mapProvider={mapProvider}
+          suppressNavigationPrompt={suppressNavigationPrompt}
+          onTake={onTake}
+          onDeliver={onDeliver}
+          onCourier={onCourier}
+          onDelete={onDelete}
+        />
       </section>
     </div>
   );
