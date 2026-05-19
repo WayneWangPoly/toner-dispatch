@@ -1185,9 +1185,68 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
   );
 }
 
-function PhotoImportSheet({ close, openManualEntry }) {
+function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
   const [imageName, setImageName] = useState("");
-  const [rawText, setRawText] = useState("");
+  const [imageBase64, setImageBase64] = useState("");
+  const [mimeType, setMimeType] = useState("image/jpeg");
+  const [busy, setBusy] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [preview, setPreview] = useState("");
+
+  async function handleFileChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImageName(file.name || "docket-photo.jpg");
+    setMimeType(file.type || "image/jpeg");
+    setScanError("");
+
+    const compressed = await compressImageToBase64(file, 1600, 0.82);
+    setImageBase64(compressed.base64);
+    setMimeType(compressed.mimeType);
+    setPreview(`data:${compressed.mimeType};base64,${compressed.base64}`);
+  }
+
+  async function recogniseDocket() {
+    if (!imageBase64) {
+      setScanError("Please take or upload a docket photo first.");
+      return;
+    }
+
+    if (!supabase) {
+      setScanError("Supabase is not connected. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      return;
+    }
+
+    setBusy(true);
+    setScanError("");
+
+    const { data, error } = await supabase.functions.invoke("scan-docket", {
+      body: {
+        imageBase64,
+        mimeType,
+      },
+    });
+
+    setBusy(false);
+
+    if (error) {
+      setScanError(error.message || "Failed to scan docket.");
+      return;
+    }
+
+    if (data?.error) {
+      setScanError(data.error);
+      return;
+    }
+
+    if (!data?.data) {
+      setScanError("No extracted data returned.");
+      return;
+    }
+
+    onExtracted(data.data);
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-slate-950/50 sm:items-center sm:justify-center">
@@ -1195,29 +1254,54 @@ function PhotoImportSheet({ close, openManualEntry }) {
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-black text-slate-950">Scan Docket</h2>
-            <p className="mt-1 text-xs text-slate-500">Scan should extract: Docket No, Deliver To organisation, street address, suburb, state, postcode, Equipment No, and short product/toner code only.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Take a photo of the delivery docket. The scan will extract Docket No, Deliver To, Equipment No, and product code.
+            </p>
           </div>
-          <button onClick={close} className="rounded-2xl bg-slate-100 p-2 text-slate-700"><X className="h-5 w-5" /></button>
+          <button onClick={close} className="rounded-2xl bg-slate-100 p-2 text-slate-700">
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         <label className="block rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
-          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setImageName(e.target.files?.[0]?.name || "")} />
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFileChange}
+          />
           <div className="text-sm font-black text-slate-950">Tap to take/upload docket photo</div>
           <div className="mt-1 text-xs text-slate-500">{imageName || "No image selected"}</div>
         </label>
 
-        <div className="mt-4">
-          <label className="mb-1 block text-xs font-black uppercase tracking-wider text-slate-500">OCR text / sample text</label>
-          <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} placeholder="OCR target example: Docket No AN06561284; Deliver To RETIRE AUSTRALIA MANAGEMENT PTY LTD; 170 OAKLANDS ROAD; GLENGOWRIE SA 5044; Equip No 290459; Product WT-202." className="min-h-32 w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-medium text-slate-950 outline-none placeholder:text-slate-400 focus:border-red-500" />
-        </div>
+        {preview && (
+          <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-50">
+            <img src={preview} alt="Docket preview" className="max-h-72 w-full object-contain" />
+          </div>
+        )}
+
+        {scanError && (
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">
+            {scanError}
+          </div>
+        )}
 
         <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Real photo recognition should run through a backend or Supabase Edge Function, not directly in the browser with a secret API key.
+          The scan will fill the Add Docket form. Please check the result before saving.
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
-          <button onClick={close} className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black text-slate-900">Cancel</button>
-          <button onClick={openManualEntry} className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white">Manual Add</button>
+          <button onClick={openManualEntry} className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black text-slate-900">
+            Manual Add
+          </button>
+          <button
+            onClick={recogniseDocket}
+            disabled={busy || !imageBase64}
+            className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            {busy ? "Scanning..." : "Recognise"}
+          </button>
         </div>
       </div>
     </div>
