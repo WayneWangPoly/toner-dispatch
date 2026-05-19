@@ -3,17 +3,6 @@ import { AlertTriangle, MapPin, Navigation, Package, Plus, Search, UserCheck, X 
 import { supabase } from "./lib/supabaseClient";
 import LoginScreen from "./components/LoginScreen";
 
-const getEnv = (key) => {
-  try {
-    return import.meta && import.meta.env ? import.meta.env[key] || "" : "";
-  } catch {
-    return "";
-  }
-};
-
-const SUPABASE_URL = getEnv("VITE_SUPABASE_URL");
-const SUPABASE_ANON_KEY = getEnv("VITE_SUPABASE_ANON_KEY");
-const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 const ADELAIDE_CENTER = { lat: -34.9285, lng: 138.6007 };
 const MAP_ZOOM = 11;
