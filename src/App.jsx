@@ -1653,7 +1653,7 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
         )}
 
         <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          The scan will fill the Add Docket form. Please check the result before saving.
+          Free OCR will read the docket on this phone. Please check the result before saving.
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
