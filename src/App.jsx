@@ -391,6 +391,9 @@ function runSelfTests() {
 runSelfTests();
 
 export default function TonerDispatchMVP() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(supabase));
+
   const [orders, setOrders] = useState(demoOrders);
   const [equipment, setEquipment] = useState({});
   const [loading, setLoading] = useState(Boolean(supabase));
