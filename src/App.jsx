@@ -825,7 +825,9 @@ if (supabase && !session) {
         </section>
 
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">Loading dispatch data...</div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">
+            Loading dispatch data...
+          </div>
         ) : tab === "Map" ? (
           <MapView
             orders={visibleOrders}
@@ -835,8 +837,8 @@ if (supabase && !session) {
             onTake={takeOrder}
             onDeliver={deliverOrder}
             onCourier={markCourier}
-            onDelete={deleteOrder}
           />
+        ) : tab === "Mine" ? (
           <MineView
             staff={staff}
             setStaff={setStaff}
@@ -851,7 +853,11 @@ if (supabase && !session) {
             onDelete={deleteOrder}
           />
         ) : tab === "History" ? (
-          <HistoryView orders={historyOrders} filters={historyFilters} setFilters={setHistoryFilters} />
+          <HistoryView
+            orders={historyOrders}
+            filters={historyFilters}
+            setFilters={setHistoryFilters}
+          />
         ) : (
           <OrderList
             orders={visibleOrders}
