@@ -972,7 +972,16 @@ function OrderList({ orders, mapProvider, suppressNavigationPrompt, onTake, onDe
           </div>
           <div className="space-y-3">
             {group.items.map((order) => (
-              <OrderCard key={order.id} order={order} mapProvider={mapProvider} suppressNavigationPrompt={suppressNavigationPrompt} onTake={onTake} onDeliver={onDeliver} onCourier={onCourier} />
+              <OrderCard
+                key={order.id}
+                order={order}
+                mapProvider={mapProvider}
+                suppressNavigationPrompt={suppressNavigationPrompt}
+                onTake={onTake}
+                onDeliver={onDeliver}
+                onCourier={onCourier}
+                onDelete={onDelete}
+              />
             ))}
           </div>
         </section>
@@ -981,52 +990,141 @@ function OrderList({ orders, mapProvider, suppressNavigationPrompt, onTake, onDe
   );
 }
 
-function OrderCard({ order, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
+function OrderCard({ order, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier, onDelete }) {
   const days = waitingDays(order.created_at);
   const urgent = order.priority === "High" || days >= 5;
+  const [dragX, setDragX] = useState(0);
+  const [isOpen, setIsOpen] = useState(false);
+  const startXRef = useRef(0);
+  const draggingRef = useRef(false);
+
+  function handleTouchStart(event) {
+    startXRef.current = event.touches[0].clientX;
+    draggingRef.current = true;
+  }
+
+  function handleTouchMove(event) {
+    if (!draggingRef.current) return;
+
+    const currentX = event.touches[0].clientX;
+    const deltaX = currentX - startXRef.current;
+
+    if (deltaX < 0) {
+      setDragX(Math.max(deltaX, -96));
+    } else if (isOpen) {
+      setDragX(Math.min(-96 + deltaX, 0));
+    }
+  }
+
+  function handleTouchEnd() {
+    draggingRef.current = false;
+
+    if (dragX <= -48) {
+      setDragX(-96);
+      setIsOpen(true);
+    } else {
+      setDragX(0);
+      setIsOpen(false);
+    }
+  }
+
+  function closeSwipe() {
+    setDragX(0);
+    setIsOpen(false);
+  }
 
   return (
-    <article className={`rounded-3xl border p-3.5 shadow-sm ${urgent ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-black text-slate-950">{order.equipment_id}</h2>
-            {urgent && <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />}
-          </div>
-          <p className="mt-1 truncate text-sm font-bold text-slate-700">{order.customer_name}</p>
-          {order.docket_no && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500">Docket {order.docket_no}</p>}
-        </div>
-        <div className="shrink-0 rounded-2xl bg-slate-100 px-3 py-2 text-center">
-          <div className="text-lg font-black leading-none text-slate-950">{days}</div>
-          <div className="text-[9px] font-bold uppercase text-slate-500">days</div>
-        </div>
-      </div>
-
-      <div className="mt-3 space-y-2 text-xs text-slate-700">
-        <Info icon={<MapPin className="h-3.5 w-3.5" />} text={displayAddress(order)} />
-        <Info icon={<Package className="h-3.5 w-3.5" />} text={`${order.toner_code} · ${order.direction}`} />
-        {order.taken_by && <Info icon={<UserCheck className="h-3.5 w-3.5" />} text={`Taken by ${order.taken_by}`} />}
-        {order.notes && <div className="line-clamp-2 rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-600">{order.notes}</div>}
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
+    <div className="relative overflow-hidden rounded-3xl">
+      <div className="absolute inset-y-0 right-0 flex w-24 items-center justify-center bg-red-600">
         <button
-          onClick={() => openNavigation(order, mapProvider, suppressNavigationPrompt)}
-          className="rounded-2xl border border-slate-300 bg-white px-2 py-3 text-xs font-black text-slate-900 active:scale-[.98]"
+          type="button"
+          onClick={() => {
+            closeSwipe();
+            onDelete(order);
+          }}
+          className="h-full w-full text-sm font-black text-white"
         >
-          Navigation
+          Delete
         </button>
-
-        {order.status === "Waiting" ? (
-          <>
-            <button onClick={() => onTake(order.id)} className="rounded-2xl bg-red-600 px-2 py-3 text-xs font-black text-white active:scale-[.98]">Take</button>
-            <button onClick={() => onCourier(order.id)} className="rounded-2xl bg-slate-950 px-2 py-3 text-xs font-black text-white active:scale-[.98]">Courier</button>
-          </>
-        ) : (
-          <button onClick={() => onDeliver(order)} className="col-span-2 rounded-2xl bg-slate-950 px-2 py-3 text-xs font-black text-white active:scale-[.98]">Delivered</button>
-        )}
       </div>
-    </article>
+
+      <article
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          transform: `translateX(${dragX}px)`,
+          transition: draggingRef.current ? "none" : "transform 180ms ease",
+        }}
+        className={`relative rounded-3xl border p-3.5 shadow-sm ${
+          urgent ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-base font-black text-slate-950">{order.equipment_id}</h2>
+              {urgent && <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />}
+            </div>
+            <p className="mt-1 truncate text-sm font-bold text-slate-700">{order.customer_name}</p>
+            {order.docket_no && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500">Docket {order.docket_no}</p>}
+          </div>
+
+          <div className="shrink-0 rounded-2xl bg-slate-100 px-3 py-2 text-center">
+            <div className="text-lg font-black leading-none text-slate-950">{days}</div>
+            <div className="text-[9px] font-bold uppercase text-slate-500">days</div>
+          </div>
+        </div>
+
+        <div className="mt-3 space-y-2 text-xs text-slate-700">
+          <Info icon={<MapPin className="h-3.5 w-3.5" />} text={displayAddress(order)} />
+          <Info icon={<Package className="h-3.5 w-3.5" />} text={`${order.toner_code} · ${order.direction}`} />
+          {order.taken_by && <Info icon={<UserCheck className="h-3.5 w-3.5" />} text={`Taken by ${order.taken_by}`} />}
+          {order.notes && <div className="line-clamp-2 rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-600">{order.notes}</div>}
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button
+            onClick={() => openNavigation(order, mapProvider, suppressNavigationPrompt)}
+            className="rounded-2xl border border-slate-300 bg-white px-2 py-3 text-xs font-black text-slate-900 active:scale-[.98]"
+          >
+            Navigation
+          </button>
+
+          {order.status === "Waiting" ? (
+            <>
+              <button
+                onClick={() => onTake(order.id)}
+                className="rounded-2xl bg-red-600 px-2 py-3 text-xs font-black text-white active:scale-[.98]"
+              >
+                Take
+              </button>
+              <button
+                onClick={() => onCourier(order.id)}
+                className="rounded-2xl bg-slate-950 px-2 py-3 text-xs font-black text-white active:scale-[.98]"
+              >
+                Courier
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => onDeliver(order)}
+              className="col-span-2 rounded-2xl bg-slate-950 px-2 py-3 text-xs font-black text-white active:scale-[.98]"
+            >
+              Delivered
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onDelete(order)}
+          className="mt-2 w-full rounded-2xl border border-red-200 bg-red-50 px-2 py-2 text-xs font-black text-red-700 sm:hidden"
+        >
+          Delete
+        </button>
+      </article>
+    </div>
   );
 }
 
