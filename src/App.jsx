@@ -573,72 +573,113 @@ useEffect(() => {
   }
 
   async function addOrder() {
+  if (saveOrderLockRef.current) return;
+
   const defaults = suburbDefaults[normalizeSuburb(form.suburb)] || {};
 
-  const { data: authData } = supabase
-    ? await supabase.auth.getUser()
-    : { data: {} };
-
-  const currentUser = authData?.user;
-
   const payload = {
-      docket_no: form.docket_no.trim(),
-      equipment_id: form.equipment_id.trim().toUpperCase(),
-      customer_name: form.customer_name.trim(),
-      address: (form.street_address || form.address).trim(),
-      street_address: (form.street_address || form.address).trim(),
-      suburb: form.suburb.trim(),
-      state: (form.state || "SA").trim().toUpperCase(),
-      postcode: form.postcode.trim(),
-      country: (form.country || "Australia").trim(),
-      direction: form.direction,
-      toner_code: form.toner_code.trim(),
-      priority: form.priority,
-      status: "Waiting",
-      created_by: currentUser?.id || null,
-      created_by_name: staff,
-      taken_by: null,
-      taken_at: null,
-      delivered_at: null,
-      created_at: new Date().toISOString(),
-      lat: toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat),
-      lng: toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng),
-      notes: form.notes.trim(),
-    };
+    docket_no: form.docket_no.trim(),
+    equipment_id: form.equipment_id.trim().toUpperCase(),
+    customer_name: form.customer_name.trim(),
+    address: (form.street_address || form.address).trim(),
+    street_address: (form.street_address || form.address).trim(),
+    suburb: form.suburb.trim(),
+    state: (form.state || "SA").trim().toUpperCase(),
+    postcode: form.postcode.trim(),
+    country: (form.country || "Australia").trim(),
+    direction: form.direction,
+    toner_code: form.toner_code.trim(),
+    priority: form.priority,
+    status: "Waiting",
+    created_by_name: staff,
+    taken_by: null,
+    taken_at: null,
+    delivered_at: null,
+    created_at: new Date().toISOString(),
+    lat: toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat),
+    lng: toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng),
+    notes: form.notes.trim(),
+  };
 
-    if (!payload.equipment_id || !payload.customer_name || !payload.suburb || !payload.direction || !payload.toner_code) return;
+  if (
+    !payload.equipment_id ||
+    !payload.customer_name ||
+    !payload.suburb ||
+    !payload.direction ||
+    !payload.toner_code
+  ) {
+    setError("Please complete Equipment ID, Customer, Suburb, Direction and Toner Code before saving.");
+    return;
+  }
 
+  saveOrderLockRef.current = true;
+  setSavingOrder(true);
+  setError("");
+
+  try {
     if (supabase) {
-      const insertResult = await supabase.from("dispatch_orders").insert(payload).select("*").single();
-      if (insertResult.error) return setError(insertResult.error.message);
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUser = authData?.user;
+
+      const finalPayload = {
+        ...payload,
+        created_by: currentUser?.id || null,
+      };
+
+      const insertResult = await supabase
+        .from("dispatch_orders")
+        .insert(finalPayload)
+        .select("*")
+        .single();
+
+      if (insertResult.error) {
+        setError(insertResult.error.message);
+        return;
+      }
 
       await supabase.from("equipment_master").upsert({
-        equipment_id: payload.equipment_id,
-        customer_name: payload.customer_name,
-        address: payload.address,
-        street_address: payload.street_address,
-        suburb: payload.suburb,
-        state: payload.state,
-        postcode: payload.postcode,
-        country: payload.country,
-        direction: payload.direction,
-        lat: payload.lat,
-        lng: payload.lng,
+        equipment_id: finalPayload.equipment_id,
+        customer_name: finalPayload.customer_name,
+        address: finalPayload.address,
+        street_address: finalPayload.street_address,
+        suburb: finalPayload.suburb,
+        state: finalPayload.state,
+        postcode: finalPayload.postcode,
+        country: finalPayload.country,
+        direction: finalPayload.direction,
+        lat: finalPayload.lat,
+        lng: finalPayload.lng,
         updated_at: new Date().toISOString(),
       });
 
       setOrders((prev) => [...prev, insertResult.data]);
-      setEquipment((prev) => ({ ...prev, [payload.equipment_id]: payload }));
+      setEquipment((prev) => ({
+        ...prev,
+        [finalPayload.equipment_id]: finalPayload,
+      }));
     } else {
-      const localRow = { ...payload, id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `local-${Date.now()}` };
+      const localRow = {
+        ...payload,
+        id:
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `local-${Date.now()}`,
+      };
+
       setOrders((prev) => [...prev, localRow]);
-      setEquipment((prev) => ({ ...prev, [payload.equipment_id]: payload }));
+      setEquipment((prev) => ({
+        ...prev,
+        [payload.equipment_id]: payload,
+      }));
     }
 
     setForm(emptyForm());
     setShowAdd(false);
+  } finally {
+    saveOrderLockRef.current = false;
+    setSavingOrder(false);
   }
-
+}
   async function updateOrder(id, patch) {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
     if (supabase && !String(id).startsWith("demo-")) {
