@@ -573,8 +573,15 @@ useEffect(() => {
   }
 
   async function addOrder() {
-    const defaults = suburbDefaults[normalizeSuburb(form.suburb)] || {};
-    const payload = {
+  const defaults = suburbDefaults[normalizeSuburb(form.suburb)] || {};
+
+  const { data: authData } = supabase
+    ? await supabase.auth.getUser()
+    : { data: {} };
+
+  const currentUser = authData?.user;
+
+  const payload = {
       docket_no: form.docket_no.trim(),
       equipment_id: form.equipment_id.trim().toUpperCase(),
       customer_name: form.customer_name.trim(),
@@ -588,6 +595,8 @@ useEffect(() => {
       toner_code: form.toner_code.trim(),
       priority: form.priority,
       status: "Waiting",
+      created_by: currentUser?.id || null,
+      created_by_name: staff,
       taken_by: null,
       taken_at: null,
       delivered_at: null,
