@@ -662,7 +662,24 @@ useEffect(() => {
       await supabase.from("equipment_master").update({ last_delivery: deliveredAt, updated_at: deliveredAt }).eq("equipment_id", order.equipment_id);
     }
   }
+  if (authLoading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-700 font-bold">
+      Checking login...
+    </div>
+  );
+}
 
+if (supabase && !session) {
+  return (
+    <LoginScreen
+      onLogin={(_user, name) => {
+        localStorage.setItem("toner_staff_name", name);
+        setStaff(name);
+      }}
+    />
+  );
+}
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
