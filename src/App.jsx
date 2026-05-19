@@ -137,6 +137,19 @@ const suburbDefaults = {
   willunga: { direction: "Far South", lat: -35.271, lng: 138.5546 },
 };
 
+const suburbOptions = Object.entries(suburbDefaults)
+  .map(([key, value]) => ({
+    key,
+    label: key
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" "),
+    direction: value.direction,
+    lat: value.lat,
+    lng: value.lng,
+  }))
+  .sort((a, b) => a.label.localeCompare(b.label));
+
 function daysAgo(days) {
   const d = new Date();
   d.setDate(d.getDate() - days);
