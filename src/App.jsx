@@ -406,7 +406,9 @@ export default function TonerDispatchMVP() {
     staff: "",
   });
   const [area, setArea] = useState("All");
-  const [staff, setStaff] = useState("Service");
+  const [staff, setStaff] = useState(() => {
+    return getStoredPreference("toner_staff_name", "Aaron");
+  });
   const [showAdd, setShowAdd] = useState(false);
   const [showPhotoImport, setShowPhotoImport] = useState(false);
   const [since, setSince] = useState(() => new Date().toISOString());
