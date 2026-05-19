@@ -1558,7 +1558,7 @@ function MineView({ staff, setStaff, mapProvider, setMapProvider, suppressNaviga
   );
 }
 
-function AddSheet({ form, updateForm, addOrder, close }) {
+function AddSheet({ form, updateForm, addOrder, close, saving }) {
   const canSubmit = form.equipment_id && form.customer_name && form.suburb && form.direction && form.toner_code;
 
   return (
@@ -1590,8 +1590,22 @@ function AddSheet({ form, updateForm, addOrder, close }) {
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
-          <button onClick={close} className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black text-slate-900">Cancel</button>
-          <button disabled={!canSubmit} onClick={addOrder} className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">Save</button>
+          <button
+            onClick={close}
+            disabled={saving}
+            className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            disabled={!canSubmit || saving}
+            onClick={addOrder}
+            className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
         </div>
       </div>
     </div>
