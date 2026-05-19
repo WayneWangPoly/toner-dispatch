@@ -712,6 +712,29 @@ useEffect(() => {
       await supabase.from("equipment_master").update({ last_delivery: deliveredAt, updated_at: deliveredAt }).eq("equipment_id", order.equipment_id);
     }
   }
+
+  async function deleteOrder(order) {
+  const confirmed = window.confirm(
+    `Delete this docket?\n\n${order.equipment_id || ""}\n${order.customer_name || ""}\n${order.toner_code || ""}`
+  );
+
+  if (!confirmed) return;
+
+  setOrders((prev) => prev.filter((o) => o.id !== order.id));
+
+  if (supabase && !String(order.id).startsWith("demo-")) {
+    const result = await supabase
+      .from("dispatch_orders")
+      .delete()
+      .eq("id", order.id);
+
+    if (result.error) {
+      setError(result.error.message);
+      await loadData();
+    }
+  }
+}
+  
   if (authLoading) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-700 font-bold">
