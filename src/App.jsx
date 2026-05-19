@@ -641,7 +641,10 @@ export default function TonerDispatchMVP() {
             <h1 className="text-lg font-black leading-tight sm:text-2xl">Daily Board</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowPhotoImport(true)} className="hidden rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm active:scale-95 sm:inline-flex">
+            <button
+              onClick={() => setShowPhotoImport(true)}
+              className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm active:scale-95"
+            >
               Scan
             </button>
             <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 rounded-2xl bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-sm active:scale-95">
