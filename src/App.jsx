@@ -1855,7 +1855,7 @@ function AddSheet({ form, updateForm, addOrder, close, saving }) {
           <Field label="Toner Code" value={form.toner_code} onChange={(v) => updateForm("toner_code", v)} icon={<Package className="h-4 w-4" />} placeholder="WT-B1 / W9060MC" />
           <Field label="Customer" value={form.customer_name} onChange={(v) => updateForm("customer_name", v)} placeholder="Customer name" />
           <Field label="Street address" value={form.street_address || form.address} onChange={(v) => updateForm("street_address", v)} placeholder="Street number and street name" />
-          <Field label="Suburb" value={form.suburb} onChange={(v) => updateForm("suburb", v)} icon={<MapPin className="h-4 w-4" />} placeholder="Suburb" />
+          <SuburbSelect label="Suburb" value={form.suburb} onChange={(v) => updateForm("suburb", v)} />
           <Field label="State" value={form.state} onChange={(v) => updateForm("state", v)} placeholder="SA / VIC / NSW" />
           <Field label="Postcode" value={form.postcode} onChange={(v) => updateForm("postcode", v)} placeholder="Postcode" />
           <Field label="Country" value={form.country} onChange={(v) => updateForm("country", v)} placeholder="Australia" />
