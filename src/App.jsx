@@ -713,7 +713,41 @@ export default function TonerDispatchMVP() {
       </nav>
 
       {showAdd && <AddSheet form={form} updateForm={updateForm} addOrder={addOrder} close={() => setShowAdd(false)} />}
-      {showPhotoImport && <PhotoImportSheet close={() => setShowPhotoImport(false)} openManualEntry={() => { setShowPhotoImport(false); setShowAdd(true); }} />}
+      {showPhotoImport && (
+        <PhotoImportSheet
+          close={() => setShowPhotoImport(false)}
+          openManualEntry={() => {
+            setShowPhotoImport(false);
+            setShowAdd(true);
+          }}
+          onExtracted={(data) => {
+            const suburbKey = normalizeSuburb(data.suburb || "");
+            const defaults = suburbDefaults[suburbKey] || {};
+
+            setForm({
+              ...emptyForm(),
+              docket_no: data.docket_no || "",
+              equipment_id: data.equipment_id || "",
+              customer_name: data.customer_name || "",
+              address: data.street_address || "",
+              street_address: data.street_address || "",
+              suburb: data.suburb || "",
+              state: data.state || "",
+              postcode: data.postcode || "",
+              country: data.country || "Australia",
+              direction: defaults.direction || "",
+              toner_code: data.toner_code || "",
+              priority: data.priority || "Normal",
+              notes: data.notes || "",
+              lat: defaults.lat ? String(defaults.lat) : "",
+              lng: defaults.lng ? String(defaults.lng) : "",
+            });
+
+            setShowPhotoImport(false);
+            setShowAdd(true);
+          }}
+        />
+      )}
     </div>
   );
 }
