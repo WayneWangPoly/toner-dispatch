@@ -428,9 +428,34 @@ export default function TonerDispatchMVP() {
   }
 
   useEffect(() => {
-    if (!supabase) return;
-    loadData();
-  }, []);
+  if (!supabase) {
+    setAuthLoading(false);
+    return;
+  }
+
+  supabase.auth.getSession().then(({ data }) => {
+    setSession(data.session);
+    setAuthLoading(false);
+  });
+
+  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    setSession(session);
+
+    if (!session) {
+      localStorage.removeItem("toner_staff_name");
+      setStaff("Aaron");
+    }
+  });
+
+  return () => {
+    data.subscription.unsubscribe();
+  };
+}, []);
+
+useEffect(() => {
+  if (!supabase || !session) return;
+  loadData();
+}, [session]);
 
   async function loadData() {
     setLoading(true);
