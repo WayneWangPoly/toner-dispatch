@@ -412,6 +412,8 @@ export default function TonerDispatchMVP() {
   const [since, setSince] = useState(() => new Date().toISOString());
   const [error, setError] = useState("");
   const [form, setForm] = useState(emptyForm());
+  const [savingOrder, setSavingOrder] = useState(false);
+  const saveOrderLockRef = useRef(false);
   const [mapProvider, setMapProviderState] = useState(() => getStoredPreference("toner_default_map", "Google Maps"));
   const [suppressNavigationPrompt, setSuppressNavigationPromptState] = useState(() => getStoredPreference("toner_nav_prompt", "show") === "hide");
 
