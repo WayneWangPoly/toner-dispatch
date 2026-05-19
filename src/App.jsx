@@ -698,6 +698,19 @@ if (supabase && !session) {
             <h1 className="text-lg font-black leading-tight sm:text-2xl">Daily Board</h1>
           </div>
           <div className="flex items-center gap-2">
+            {session && (
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  localStorage.removeItem("toner_staff_name");
+                  setStaff("Aaron");
+                }}
+                className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm active:scale-95"
+              >
+                Logout
+              </button>
+            )}
+
             <button
               onClick={() => setShowPhotoImport(true)}
               className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm active:scale-95"
