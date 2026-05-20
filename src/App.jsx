@@ -1449,7 +1449,18 @@ function extractDocketFieldsFromText(text = "") {
       postcode = m[3];
     }
   }
+  if (!suburb && suburbOptions.length > 0) {
+  const textForSearch = ` ${fullText.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
 
+  const matchedSuburb = suburbOptions.find((item) => {
+    const label = item.label.toLowerCase();
+    return textForSearch.includes(` ${label} `);
+  });
+
+  if (matchedSuburb) {
+    suburb = matchedSuburb.label;
+  }
+}
   if (!street_address) {
     const possibleAddress = lines.find((line) =>
       /^\d+\s+[A-Za-z]/.test(line) &&
