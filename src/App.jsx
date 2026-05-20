@@ -1837,34 +1837,101 @@ function Select({ label, value, onChange, options }) {
 }
 
 function SuburbSelect({ label, value, onChange }) {
+  const [query, setQuery] = useState(value || "");
+  const [open, setOpen] = useState(false);
+
   const hasSuburbs = suburbOptions.length > 0;
 
+  const filteredSuburbs = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+
+    if (!keyword) {
+      return suburbOptions.slice(0, 12);
+    }
+
+    return suburbOptions
+      .filter((suburb) => {
+        const label = suburb.label.toLowerCase();
+        const key = suburb.key.toLowerCase().replaceAll("_", " ");
+        return label.includes(keyword) || key.includes(keyword);
+      })
+      .slice(0, 12);
+  }, [query]);
+
+  useEffect(() => {
+    setQuery(value || "");
+  }, [value]);
+
+  function chooseSuburb(suburb) {
+    setQuery(suburb.label);
+    setOpen(false);
+    onChange(suburb.label);
+  }
+
   return (
-    <label className="block">
+    <label className="relative block">
       <span className="mb-1 block text-xs font-black uppercase tracking-wider text-slate-500">
         {label}
       </span>
 
-      <select
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-950 outline-none focus:border-red-500"
-      >
-        <option value="">
-          {hasSuburbs ? "Select suburb" : "No suburbs loaded"}
-        </option>
-
-        {suburbOptions.map((suburb) => (
-          <option key={suburb.key} value={suburb.label}>
-            {suburb.label} · {suburb.direction}
-          </option>
-        ))}
-      </select>
+      <input
+        value={query}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        placeholder={hasSuburbs ? "Type suburb, e.g. Prospect" : "No suburbs loaded"}
+        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-950 outline-none placeholder:text-slate-400 focus:border-red-500"
+      />
 
       {!hasSuburbs && (
         <div className="mt-1 text-xs font-bold text-red-600">
           Suburb table is empty. Re-run Build SA suburbs in GitHub Actions.
         </div>
+      )}
+
+      {open && hasSuburbs && (
+        <div className="absolute left-0 right-0 z-[70] mt-1 max-h-72 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
+          {filteredSuburbs.length === 0 ? (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              className="w-full px-3 py-3 text-left text-sm font-bold text-slate-500"
+            >
+              No matching suburb
+            </button>
+          ) : (
+            filteredSuburbs.map((suburb) => (
+              <button
+                key={suburb.key}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  chooseSuburb(suburb);
+                }}
+                className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-b-0 active:bg-slate-100"
+              >
+                <span className="text-sm font-black text-slate-950">
+                  {suburb.label}
+                </span>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-black text-red-600">
+                  {suburb.direction}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {open && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-[60] cursor-default bg-transparent"
+          aria-label="Close suburb suggestions"
+        />
       )}
     </label>
   );
