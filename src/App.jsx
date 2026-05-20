@@ -156,7 +156,13 @@ function emptyForm() {
 }
 
 function normalizeSuburb(value = "") {
-  return value.trim().toLowerCase().split(" ").filter(Boolean).join("_");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .join("_");
 }
 
 function waitingDays(createdAt) {
