@@ -867,10 +867,6 @@ if (supabase && !session) {
             setShowPhotoImport(false);
             setShowAdd(true);
           }}
-
-            setShowPhotoImport(false);
-            setShowAdd(true);
-          }}
         />
       )}
     </div>
