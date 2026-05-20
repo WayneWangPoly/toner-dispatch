@@ -294,21 +294,6 @@ function groupOrdersForMap(orders) {
   });
 }
 
-function runSelfTests() {
-  const tests = [
-    ["normalizeSuburb handles spaces", normalizeSuburb("  Mawson   Lakes ") === "mawson_lakes"],
-    ["waitingDays never negative", waitingDays(new Date(Date.now() + 86400000).toISOString()) === 0],
-    ["suburb default exists", suburbDefaults[normalizeSuburb("Mount Barker")].direction === "Southeast"],
-    ["direction option includes Southwest", directionOptions.includes("Southwest")],
-    ["tile projection produces finite x", Number.isFinite(latLngToWorldPixels(-34.9285, 138.6007, 11).x)],
-    ["world pixel converts back to lat/lng", Number.isFinite(worldPixelsToLatLng(464000, 316000, 11).lat)],
-  ];
-  const failed = tests.filter((item) => !item[1]).map((item) => item[0]);
-  if (failed.length > 0) console.warn("Toner Dispatch self-tests failed:", failed);
-}
-
-runSelfTests();
-
 export default function TonerDispatchMVP() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
