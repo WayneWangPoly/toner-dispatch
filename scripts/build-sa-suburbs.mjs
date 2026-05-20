@@ -8,38 +8,24 @@ function normalizeSuburb(value = "") {
   return value.trim().toLowerCase().split(/\s+/).filter(Boolean).join("_");
 }
 
-function titleCaseSuburb(value = "") {
-  return value
-    .trim()
-    .split(/[\s_]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function inferDirection(lat, lng) {
   const cbdLat = -34.9285;
   const cbdLng = 138.6007;
-
   const dLat = lat - cbdLat;
   const dLng = lng - cbdLng;
   const distanceApprox = Math.sqrt(dLat * dLat + dLng * dLng);
 
   if (distanceApprox < 0.025) return "CBD";
-
   if (dLat > 0.16) return "Far North";
   if (dLat < -0.30) return "Far South";
-
   if (dLat > 0.04 && dLng > 0.04) return "Northeast";
   if (dLat > 0.04 && dLng < -0.04) return "Northwest";
   if (dLat < -0.04 && dLng > 0.04) return "Southeast";
   if (dLat < -0.04 && dLng < -0.04) return "Southwest";
-
   if (dLat > 0.04) return "North";
   if (dLat < -0.04) return "South";
   if (dLng > 0.04) return "East";
   if (dLng < -0.04) return "West";
-
   return "CBD";
 }
 
@@ -90,38 +76,47 @@ function parseCsv(text) {
   return rows;
 }
 
-function findColumn(headers, candidates) {
-  const lower = headers.map((h) => h.trim().toLowerCase());
+function cleanHeader(value = "") {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
 
-  for (const candidate of candidates) {
-    const index = lower.findIndex((h) => h === candidate.toLowerCase());
-    if (index >= 0) return index;
+function findColumn(headers, candidates) {
+  const cleaned = headers.map(cleanHeader);
+
+  for (const candidate of candidates.map(cleanHeader)) {
+    const exact = cleaned.findIndex((h) => h === candidate);
+    if (exact >= 0) return exact;
   }
 
-  for (const candidate of candidates) {
-    const index = lower.findIndex((h) => h.includes(candidate.toLowerCase()));
-    if (index >= 0) return index;
+  for (const candidate of candidates.map(cleanHeader)) {
+    const includes = cleaned.findIndex((h) => h.includes(candidate));
+    if (includes >= 0) return includes;
   }
 
   return -1;
 }
 
-function extractLonLatPairsFromWkt(wkt = "") {
+function extractLonLatPairsFromText(text = "") {
   const pairs = [];
   const regex = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g;
   let match;
 
-  while ((match = regex.exec(wkt))) {
-    const a = Number(match[1]);
-    const b = Number(match[2]);
+  while ((match = regex.exec(text))) {
+    const lon = Number(match[1]);
+    const lat = Number(match[2]);
 
-    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
-
-    // Most AU WKT uses lon lat. Keep only plausible SA lon/lat.
-    const lon = a;
-    const lat = b;
-
-    if (lon >= 129 && lon <= 141.5 && lat >= -39 && lat <= -25) {
+    if (
+      Number.isFinite(lon) &&
+      Number.isFinite(lat) &&
+      lon >= 129 &&
+      lon <= 141.5 &&
+      lat >= -39 &&
+      lat <= -25
+    ) {
       pairs.push({ lon, lat });
     }
   }
@@ -147,6 +142,12 @@ function centroidFromPairs(pairs) {
   };
 }
 
+function getNumber(row, index) {
+  if (index < 0) return null;
+  const value = Number(row[index]);
+  return Number.isFinite(value) ? value : null;
+}
+
 const response = await fetch(CSV_URL);
 
 if (!response.ok) {
@@ -161,42 +162,88 @@ if (rows.length < 2) {
 }
 
 const headers = rows[0];
+console.log("CSV headers:");
+console.log(headers.join(" | "));
 
 const nameIndex = findColumn(headers, [
-  "name",
   "suburb",
-  "locality",
   "suburb_name",
+  "suburbname",
+  "locality",
   "locality_name",
+  "localityname",
+  "name",
   "feature_name",
+  "feature",
 ]);
 
 const geometryIndex = findColumn(headers, [
   "wkt",
+  "wkt_geom",
   "geometry",
   "geom",
   "the_geom",
   "shape",
+  "geo_shape",
+]);
+
+const latIndex = findColumn(headers, [
+  "lat",
+  "latitude",
+  "centroid_lat",
+  "centroid_y",
+  "y",
+]);
+
+const lngIndex = findColumn(headers, [
+  "lng",
+  "lon",
+  "long",
+  "longitude",
+  "centroid_lng",
+  "centroid_lon",
+  "centroid_x",
+  "x",
 ]);
 
 if (nameIndex < 0) {
   throw new Error(`Could not find suburb name column. Headers: ${headers.join(", ")}`);
 }
 
-if (geometryIndex < 0) {
-  throw new Error(`Could not find geometry/WKT column. Headers: ${headers.join(", ")}`);
-}
+console.log(`Using name column: ${headers[nameIndex]}`);
+console.log(`Using geometry column: ${geometryIndex >= 0 ? headers[geometryIndex] : "none"}`);
+console.log(`Using lat/lng columns: ${latIndex >= 0 ? headers[latIndex] : "none"} / ${lngIndex >= 0 ? headers[lngIndex] : "none"}`);
 
 const suburbDefaults = {};
 
 for (const row of rows.slice(1)) {
   const rawName = row[nameIndex]?.trim();
-  const geometry = row[geometryIndex] || "";
+  if (!rawName) continue;
 
-  if (!rawName || !geometry) continue;
+  let centroid = null;
 
-  const pairs = extractLonLatPairsFromWkt(geometry);
-  const centroid = centroidFromPairs(pairs);
+  const lat = getNumber(row, latIndex);
+  const lng = getNumber(row, lngIndex);
+
+  if (
+    lat != null &&
+    lng != null &&
+    lat >= -39 &&
+    lat <= -25 &&
+    lng >= 129 &&
+    lng <= 141.5
+  ) {
+    centroid = {
+      lat: Number(lat.toFixed(6)),
+      lng: Number(lng.toFixed(6)),
+    };
+  }
+
+  if (!centroid && geometryIndex >= 0) {
+    const geometry = row[geometryIndex] || "";
+    const pairs = extractLonLatPairsFromText(geometry);
+    centroid = centroidFromPairs(pairs);
+  }
 
   if (!centroid) continue;
 
@@ -210,6 +257,12 @@ for (const row of rows.slice(1)) {
 }
 
 const entries = Object.entries(suburbDefaults).sort(([a], [b]) => a.localeCompare(b));
+
+if (entries.length < 50) {
+  throw new Error(
+    `Only generated ${entries.length} suburbs/localities. Refusing to write empty/invalid table. Check CSV headers above.`
+  );
+}
 
 const outputObject = Object.fromEntries(entries);
 
