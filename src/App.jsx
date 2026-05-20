@@ -1393,6 +1393,40 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
     </div>
   );
 }
+function ocrDigitsOnly(value = "") {
+  return value
+    .toUpperCase()
+    .replace(/O/g, "0")
+    .replace(/Q/g, "0")
+    .replace(/D/g, "0")
+    .replace(/I/g, "1")
+    .replace(/L/g, "1")
+    .replace(/\|/g, "1")
+    .replace(/S/g, "5")
+    .replace(/Z/g, "2")
+    .replace(/B/g, "8")
+    .replace(/G/g, "6")
+    .replace(/[^0-9]/g, "");
+}
+
+function normaliseDocketNo(value = "") {
+  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  if (cleaned.length < 4) return "";
+
+  const prefix = cleaned.slice(0, 2).replace(/0/g, "O").replace(/1/g, "I");
+  const digits = ocrDigitsOnly(cleaned.slice(2));
+
+  if (!/^[A-Z]{2}$/.test(prefix)) return "";
+  if (digits.length < 5) return "";
+
+  return `${prefix}${digits}`;
+}
+
+function normaliseEquipmentNo(value = "") {
+  const digits = ocrDigitsOnly(value);
+  return digits.length >= 4 ? digits : "";
+}
 
 function extractDocketFieldsFromText(text = "") {
   const lines = text
@@ -1410,11 +1444,13 @@ function extractDocketFieldsFromText(text = "") {
     return "";
   }
 
-  const docket_no = matchOne([
-    /docket\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
-    /(?:delivery|dispatch)\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9\-]+)/i,
-    /\b(AN\d{6,})\b/i,
+  const rawDocketNo = matchOne([
+    /docket\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-\s]{6,20})/i,
+    /(?:delivery|dispatch)\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9\-\s]{6,20})/i,
+    /\b([A-Z]{2}[A-Z0-9]{5,12})\b/i,
   ]);
+
+  const docket_no = normaliseDocketNo(rawDocketNo);
 
   const equipment_id = matchOne([
     /equipment\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
