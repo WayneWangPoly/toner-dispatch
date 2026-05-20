@@ -1826,6 +1826,8 @@ function Select({ label, value, onChange, options }) {
 }
 
 function SuburbSelect({ label, value, onChange }) {
+  const hasSuburbs = suburbOptions.length > 0;
+
   return (
     <label className="block">
       <span className="mb-1 block text-xs font-black uppercase tracking-wider text-slate-500">
@@ -1837,13 +1839,22 @@ function SuburbSelect({ label, value, onChange }) {
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-950 outline-none focus:border-red-500"
       >
-        <option value="">Select suburb</option>
+        <option value="">
+          {hasSuburbs ? "Select suburb" : "No suburbs loaded"}
+        </option>
+
         {suburbOptions.map((suburb) => (
           <option key={suburb.key} value={suburb.label}>
             {suburb.label} · {suburb.direction}
           </option>
         ))}
       </select>
+
+      {!hasSuburbs && (
+        <div className="mt-1 text-xs font-bold text-red-600">
+          Suburb table is empty. Re-run Build SA suburbs in GitHub Actions.
+        </div>
+      )}
     </label>
   );
 }
