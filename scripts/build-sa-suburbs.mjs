@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
-const CSV_URL =
-  "https://data.sa.gov.au/data/dataset/e4d3a355-29d7-4bdc-a81d-13fd5ed09ef9/resource/58b3b8ef-f292-4e27-a7bc-215ad7670cda/download/suburbs.csv";
+const GEOJSON_ZIP_URL =
+  "https://www.dptiapps.com.au/dataportal/Suburbs_geojson.zip";
 
 function normalizeSuburb(value = "") {
   return value.trim().toLowerCase().split(/\s+/).filter(Boolean).join("_");
@@ -11,239 +13,181 @@ function normalizeSuburb(value = "") {
 function inferDirection(lat, lng) {
   const cbdLat = -34.9285;
   const cbdLng = 138.6007;
+
   const dLat = lat - cbdLat;
   const dLng = lng - cbdLng;
   const distanceApprox = Math.sqrt(dLat * dLat + dLng * dLng);
 
   if (distanceApprox < 0.025) return "CBD";
+
   if (dLat > 0.16) return "Far North";
   if (dLat < -0.30) return "Far South";
+
   if (dLat > 0.04 && dLng > 0.04) return "Northeast";
   if (dLat > 0.04 && dLng < -0.04) return "Northwest";
   if (dLat < -0.04 && dLng > 0.04) return "Southeast";
   if (dLat < -0.04 && dLng < -0.04) return "Southwest";
+
   if (dLat > 0.04) return "North";
   if (dLat < -0.04) return "South";
   if (dLng > 0.04) return "East";
   if (dLng < -0.04) return "West";
+
   return "CBD";
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let inQuotes = false;
+function flattenCoordinates(coords, output = []) {
+  if (!Array.isArray(coords)) return output;
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    const next = text[i + 1];
-
-    if (char === '"' && inQuotes && next === '"') {
-      cell += '"';
-      i += 1;
-      continue;
-    }
-
-    if (char === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") i += 1;
-      row.push(cell);
-      if (row.some((v) => v.trim() !== "")) rows.push(row);
-      row = [];
-      cell = "";
-      continue;
-    }
-
-    cell += char;
-  }
-
-  if (cell || row.length) {
-    row.push(cell);
-    if (row.some((v) => v.trim() !== "")) rows.push(row);
-  }
-
-  return rows;
-}
-
-function cleanHeader(value = "") {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function findColumn(headers, candidates) {
-  const cleaned = headers.map(cleanHeader);
-
-  for (const candidate of candidates.map(cleanHeader)) {
-    const exact = cleaned.findIndex((h) => h === candidate);
-    if (exact >= 0) return exact;
-  }
-
-  for (const candidate of candidates.map(cleanHeader)) {
-    const includes = cleaned.findIndex((h) => h.includes(candidate));
-    if (includes >= 0) return includes;
-  }
-
-  return -1;
-}
-
-function extractLonLatPairsFromText(text = "") {
-  const pairs = [];
-  const regex = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g;
-  let match;
-
-  while ((match = regex.exec(text))) {
-    const lon = Number(match[1]);
-    const lat = Number(match[2]);
+  if (
+    coords.length >= 2 &&
+    typeof coords[0] === "number" &&
+    typeof coords[1] === "number"
+  ) {
+    const lng = coords[0];
+    const lat = coords[1];
 
     if (
-      Number.isFinite(lon) &&
       Number.isFinite(lat) &&
-      lon >= 129 &&
-      lon <= 141.5 &&
+      Number.isFinite(lng) &&
       lat >= -39 &&
-      lat <= -25
+      lat <= -25 &&
+      lng >= 129 &&
+      lng <= 141.5
     ) {
-      pairs.push({ lon, lat });
+      output.push({ lat, lng });
     }
+
+    return output;
   }
 
-  return pairs;
+  for (const item of coords) {
+    flattenCoordinates(item, output);
+  }
+
+  return output;
 }
 
-function centroidFromPairs(pairs) {
-  if (!pairs.length) return null;
+function centroidFromPoints(points) {
+  if (!points.length) return null;
 
-  const sum = pairs.reduce(
-    (acc, p) => {
-      acc.lat += p.lat;
-      acc.lng += p.lon;
+  const sum = points.reduce(
+    (acc, point) => {
+      acc.lat += point.lat;
+      acc.lng += point.lng;
       return acc;
     },
     { lat: 0, lng: 0 }
   );
 
   return {
-    lat: Number((sum.lat / pairs.length).toFixed(6)),
-    lng: Number((sum.lng / pairs.length).toFixed(6)),
+    lat: Number((sum.lat / points.length).toFixed(6)),
+    lng: Number((sum.lng / points.length).toFixed(6)),
   };
 }
 
-function getNumber(row, index) {
-  if (index < 0) return null;
-  const value = Number(row[index]);
-  return Number.isFinite(value) ? value : null;
+function getFeatureName(feature) {
+  const props = feature?.properties || {};
+
+  const candidates = [
+    "suburb",
+    "SUBURB",
+    "Suburb",
+    "suburb_name",
+    "SUBURB_NAME",
+    "locality",
+    "LOCALITY",
+    "locality_name",
+    "LOCALITY_NAME",
+    "name",
+    "NAME",
+    "feature_name",
+    "FEATURE_NAME",
+  ];
+
+  for (const key of candidates) {
+    const value = props[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  for (const [key, value] of Object.entries(props)) {
+    if (
+      typeof value === "string" &&
+      value.trim() &&
+      /suburb|locality|name/i.test(key)
+    ) {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
-const response = await fetch(CSV_URL);
+async function downloadToFile(url, filePath) {
+  const response = await fetch(url);
 
-if (!response.ok) {
-  throw new Error(`Failed to download suburbs CSV: ${response.status} ${response.statusText}`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download GeoJSON zip: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  await fs.writeFile(filePath, Buffer.from(arrayBuffer));
 }
 
-const csvText = await response.text();
-const rows = parseCsv(csvText);
+const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "sa-suburbs-"));
+const zipPath = path.join(tmpDir, "suburbs.zip");
 
-if (rows.length < 2) {
-  throw new Error("CSV did not contain enough rows.");
+await downloadToFile(GEOJSON_ZIP_URL, zipPath);
+
+const fileList = execFileSync("unzip", ["-Z1", zipPath], {
+  encoding: "utf8",
+})
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter(Boolean);
+
+console.log("Files inside zip:");
+console.log(fileList.join("\n"));
+
+const geojsonFile = fileList.find((file) =>
+  /\.(geojson|json)$/i.test(file)
+);
+
+if (!geojsonFile) {
+  throw new Error("Could not find a .geojson or .json file inside the zip.");
 }
 
-const headers = rows[0];
-console.log("CSV headers:");
-console.log(headers.join(" | "));
+console.log(`Using GeoJSON file: ${geojsonFile}`);
 
-const nameIndex = findColumn(headers, [
-  "suburb",
-  "suburb_name",
-  "suburbname",
-  "locality",
-  "locality_name",
-  "localityname",
-  "name",
-  "feature_name",
-  "feature",
-]);
+const geojsonText = execFileSync("unzip", ["-p", zipPath, geojsonFile], {
+  encoding: "utf8",
+  maxBuffer: 50 * 1024 * 1024,
+});
 
-const geometryIndex = findColumn(headers, [
-  "wkt",
-  "wkt_geom",
-  "geometry",
-  "geom",
-  "the_geom",
-  "shape",
-  "geo_shape",
-]);
+const geojson = JSON.parse(geojsonText);
+const features = Array.isArray(geojson.features) ? geojson.features : [];
 
-const latIndex = findColumn(headers, [
-  "lat",
-  "latitude",
-  "centroid_lat",
-  "centroid_y",
-  "y",
-]);
+console.log(`GeoJSON feature count: ${features.length}`);
 
-const lngIndex = findColumn(headers, [
-  "lng",
-  "lon",
-  "long",
-  "longitude",
-  "centroid_lng",
-  "centroid_lon",
-  "centroid_x",
-  "x",
-]);
-
-if (nameIndex < 0) {
-  throw new Error(`Could not find suburb name column. Headers: ${headers.join(", ")}`);
+if (!features.length) {
+  throw new Error("GeoJSON contained no features.");
 }
 
-console.log(`Using name column: ${headers[nameIndex]}`);
-console.log(`Using geometry column: ${geometryIndex >= 0 ? headers[geometryIndex] : "none"}`);
-console.log(`Using lat/lng columns: ${latIndex >= 0 ? headers[latIndex] : "none"} / ${lngIndex >= 0 ? headers[lngIndex] : "none"}`);
+console.log("Sample properties:");
+console.log(JSON.stringify(features[0]?.properties || {}, null, 2));
 
 const suburbDefaults = {};
 
-for (const row of rows.slice(1)) {
-  const rawName = row[nameIndex]?.trim();
+for (const feature of features) {
+  const rawName = getFeatureName(feature);
   if (!rawName) continue;
 
-  let centroid = null;
-
-  const lat = getNumber(row, latIndex);
-  const lng = getNumber(row, lngIndex);
-
-  if (
-    lat != null &&
-    lng != null &&
-    lat >= -39 &&
-    lat <= -25 &&
-    lng >= 129 &&
-    lng <= 141.5
-  ) {
-    centroid = {
-      lat: Number(lat.toFixed(6)),
-      lng: Number(lng.toFixed(6)),
-    };
-  }
-
-  if (!centroid && geometryIndex >= 0) {
-    const geometry = row[geometryIndex] || "";
-    const pairs = extractLonLatPairsFromText(geometry);
-    centroid = centroidFromPairs(pairs);
-  }
+  const points = flattenCoordinates(feature.geometry?.coordinates || []);
+  const centroid = centroidFromPoints(points);
 
   if (!centroid) continue;
 
@@ -256,18 +200,20 @@ for (const row of rows.slice(1)) {
   };
 }
 
-const entries = Object.entries(suburbDefaults).sort(([a], [b]) => a.localeCompare(b));
+const entries = Object.entries(suburbDefaults).sort(([a], [b]) =>
+  a.localeCompare(b)
+);
 
 if (entries.length < 50) {
   throw new Error(
-    `Only generated ${entries.length} suburbs/localities. Refusing to write empty/invalid table. Check CSV headers above.`
+    `Only generated ${entries.length} suburbs/localities. Refusing to write empty/invalid table.`
   );
 }
 
 const outputObject = Object.fromEntries(entries);
 
-const output = `// Auto-generated from SA suburb boundary CSV.
-// Source: ${CSV_URL}
+const output = `// Auto-generated from SA suburb GeoJSON.
+// Source: ${GEOJSON_ZIP_URL}
 // Do not edit manually. Run: npm run build:suburbs
 
 export const suburbDefaults = ${JSON.stringify(outputObject, null, 2)};
@@ -287,6 +233,12 @@ export const suburbOptions = Object.entries(suburbDefaults)
 `;
 
 await fs.mkdir(path.join(process.cwd(), "src", "lib"), { recursive: true });
-await fs.writeFile(path.join(process.cwd(), "src", "lib", "saSuburbs.js"), output, "utf8");
+await fs.writeFile(
+  path.join(process.cwd(), "src", "lib", "saSuburbs.js"),
+  output,
+  "utf8"
+);
 
-console.log(`Generated src/lib/saSuburbs.js with ${entries.length} suburbs/localities.`);
+console.log(
+  `Generated src/lib/saSuburbs.js with ${entries.length} suburbs/localities.`
+);
