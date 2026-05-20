@@ -137,21 +137,17 @@ const demoOrders = [
 
 function emptyForm() {
   return {
-    docket_no: "",
-    equipment_id: "",
-    customer_name: "",
-    address: "",
-    street_address: "",
-    suburb: "",
-    state: "SA",
-    postcode: "",
-    country: "Australia",
-    direction: "",
-    toner_code: "",
+    docket_no,
+    equipment_id,
+    customer_name,
+    street_address,
+    suburb,
+    state,
+    postcode,
+    country,
+    toner_code: toner_code.trim().toUpperCase(),
     priority: "Normal",
-    notes: "",
-    lat: "",
-    lng: "",
+    notes: `OCR text:\n${fullText.slice(0, 1200)}`,
   };
 }
 
