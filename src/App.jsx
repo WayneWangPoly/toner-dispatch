@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { suburbDefaults, suburbOptions } from "./lib/saSuburbs";
-import { titleCaseSuburb } from "./lib/suburbTools";
 import { createWorker } from "tesseract.js";
 import {
   AlertTriangle,
