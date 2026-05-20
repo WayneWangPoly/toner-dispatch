@@ -1452,11 +1452,14 @@ function extractDocketFieldsFromText(text = "") {
 
   const docket_no = normaliseDocketNo(rawDocketNo);
 
-  const equipment_id = matchOne([
-    /equipment\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
-    /machine\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-]+)/i,
-    /\b(IC[A-Z0-9\-]{4,}|IR[A-Z0-9\-]{4,}|HP[A-Z0-9\-]{4,})\b/i,
+  const rawEquipmentNo = matchOne([
+    /equipment\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
+    /equip(?:ment)?\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
+    /machine\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
+    /serial\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
   ]);
+
+  const equipment_id = normaliseEquipmentNo(rawEquipmentNo);
 
   const toner_code = matchOne([
     /(?:toner|product|item|code)\s*(?:code|no|number)?\s*[:\-]?\s*([A-Z0-9\- ]{3,30})/i,
