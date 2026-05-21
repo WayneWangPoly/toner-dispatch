@@ -1523,14 +1523,14 @@ function extractDocketFieldsFromText(text = "") {
 
   return {
     docket_no,
-    equipment_id: equipment_id.toUpperCase(),
+    equipment_id,
     customer_name,
     street_address,
     suburb,
     state,
     postcode,
     country,
-    toner_code: toner_code.trim(),
+    toner_code: toner_code.trim().toUpperCase(),
     priority: "Normal",
     notes: `OCR text:\n${fullText.slice(0, 1200)}`,
   };
