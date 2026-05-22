@@ -152,6 +152,13 @@ function emptyForm() {
     notes: "",
     lat: "",
     lng: "",
+    geocode_status: "pending",
+    geocode_source: "none",
+    geocode_formatted_address: "",
+    geocode_place_id: "",
+    geocode_location_type: "",
+    geocoded_at: "",
+    manual_location_override: false,
   };
 }
 
@@ -234,10 +241,30 @@ function navigationQuery(order) {
   return [street, order.suburb, state, order.postcode, country].filter(Boolean).join(", ");
 }
 
+function fullAddressForGeocode(source = {}) {
+  const street = source.street_address || source.address || "";
+  const state = source.state || "SA";
+  const country = source.country || "Australia";
+  return [street, source.suburb, state, source.postcode, country].filter(Boolean).join(", ");
+}
+
+function hasUsableLatLng(source = {}) {
+  return Number.isFinite(Number(source.lat)) && Number.isFinite(Number(source.lng));
+}
+
+function shouldUseCachedLocation(record = {}) {
+  return ["google_geocode", "manual_override"].includes(record.geocode_source) && hasUsableLatLng(record);
+}
+
 function navigationUrl(provider, order) {
-  const query = encodeURIComponent(navigationQuery(order));
+  const hasCoords = hasUsableLatLng(order);
+  const destination = hasCoords ? `${Number(order.lat)},${Number(order.lng)}` : navigationQuery(order);
+  const query = encodeURIComponent(destination);
   if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
-  if (provider === "Waze") return `https://waze.com/ul?q=${query}&navigate=yes`;
+  if (provider === "Waze") {
+    if (hasCoords) return `https://waze.com/ul?ll=${query}&navigate=yes`;
+    return `https://waze.com/ul?q=${query}&navigate=yes`;
+  }
   return `https://www.google.com/maps/dir/?api=1&destination=${query}`;
 }
 
@@ -254,24 +281,6 @@ function addressGroupKey(order) {
   return [cleanAddress(order.street_address || order.address), normalizeSuburb(order.suburb), order.state || ""].join("|");
 }
 
-function hashString(value = "") {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function offsetLatLng(lat, lng, seed, strength = 0.006) {
-  const angle = (hashString(seed) % 360) * (Math.PI / 180);
-  const radius = ((hashString(seed + "radius") % 100) / 100) * strength + strength * 0.25;
-  return {
-    lat: lat + Math.sin(angle) * radius,
-    lng: lng + Math.cos(angle) * radius,
-  };
-}
-
 function groupOrdersForMap(orders) {
   const groups = new Map();
   orders.forEach((order) => {
@@ -284,7 +293,6 @@ function groupOrdersForMap(orders) {
     const first = group[0];
     const baseLat = toNumber(first.lat, ADELAIDE_CENTER.lat);
     const baseLng = toNumber(first.lng, ADELAIDE_CENTER.lng);
-    const adjusted = offsetLatLng(baseLat, baseLng, key, 0.0045);
     const urgentCount = group.filter((o) => o.priority === "High" || waitingDays(o.created_at) >= 5).length;
     const takenCount = group.filter((o) => o.status === "Taken").length;
     return {
@@ -294,10 +302,17 @@ function groupOrdersForMap(orders) {
       count: group.length,
       urgentCount,
       takenCount,
-      lat: adjusted.lat,
-      lng: adjusted.lng,
+      lat: baseLat,
+      lng: baseLng,
     };
   });
+}
+
+function locationStatusLabel(order) {
+  if (order.manual_location_override || order.geocode_source === "manual_override") return "manual confirmed";
+  if (order.geocode_source === "google_geocode") return `Google ${order.geocode_location_type || "APPROXIMATE"}`;
+  if (order.geocode_source === "suburb_default") return "suburb approximate";
+  return "location unverified";
 }
 
 export default function TonerDispatchMVP() {
@@ -337,6 +352,15 @@ export default function TonerDispatchMVP() {
   function setSuppressNavigationPrompt(value) {
     setSuppressNavigationPromptState(value);
     setStoredPreference("toner_nav_prompt", value ? "hide" : "show");
+  }
+
+  async function geocodeAddressWithGoogle(address) {
+    if (!supabase || !address?.trim()) return null;
+    const { data, error } = await supabase.functions.invoke("geocode-address", {
+      body: { address: address.trim() },
+    });
+    if (error) return null;
+    return data || null;
   }
 
   useEffect(() => {
@@ -381,7 +405,10 @@ useEffect(() => {
     if (!equipmentResult.error) {
       const master = {};
       (equipmentResult.data || []).forEach((row) => {
-        master[row.equipment_id] = row;
+        if (!row.last_delivery) return;
+        const key = (row.equipment_id || "").trim().toUpperCase();
+        if (!key) return;
+        master[key] = row;
       });
       setEquipment(master);
     }
@@ -470,6 +497,13 @@ useEffect(() => {
         next.direction = found.direction || "";
         next.lat = found.lat || "";
         next.lng = found.lng || "";
+        next.geocode_status = found.geocode_status || "pending";
+        next.geocode_source = found.geocode_source || "none";
+        next.geocode_formatted_address = found.geocode_formatted_address || "";
+        next.geocode_place_id = found.geocode_place_id || "";
+        next.geocode_location_type = found.geocode_location_type || "";
+        next.geocoded_at = found.geocoded_at || "";
+        next.manual_location_override = Boolean(found.manual_location_override);
       }
     }
 
@@ -488,9 +522,19 @@ useEffect(() => {
         next.direction = defaults.direction;
         next.lat = String(defaults.lat);
         next.lng = String(defaults.lng);
+        next.geocode_source = "suburb_default";
+        next.geocode_status = "pending";
+        next.geocode_location_type = "APPROXIMATE";
+        next.manual_location_override = false;
       } else {
         next.suburb = value;
       }
+    }
+    if (field === "lat" || field === "lng") {
+      next.geocode_source = "manual_override";
+      next.geocode_status = "success";
+      next.manual_location_override = true;
+      next.geocoded_at = new Date().toISOString();
     }
     setForm(next);
   }
@@ -500,9 +544,15 @@ useEffect(() => {
 
   const defaults = suburbDefaults[normalizeSuburb(form.suburb)] || {};
 
+  const equipmentKey = form.equipment_id.trim().toUpperCase();
+  const cachedEquipment = equipment[equipmentKey] || null;
+  const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
+  const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
+  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+
   const payload = {
     docket_no: form.docket_no.trim(),
-    equipment_id: form.equipment_id.trim().toUpperCase(),
+    equipment_id: equipmentKey,
     customer_name: form.customer_name.trim(),
     address: (form.street_address || form.address).trim(),
     street_address: (form.street_address || form.address).trim(),
@@ -519,8 +569,15 @@ useEffect(() => {
     taken_at: null,
     delivered_at: null,
     created_at: new Date().toISOString(),
-    lat: toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat),
-    lng: toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng),
+    lat: fallbackLat,
+    lng: fallbackLng,
+    geocode_status: form.geocode_status || (isManualOverride ? "success" : "pending"),
+    geocode_source: form.geocode_source || (isManualOverride ? "manual_override" : "none"),
+    geocode_formatted_address: form.geocode_formatted_address || null,
+    geocode_place_id: form.geocode_place_id || null,
+    geocode_location_type: form.geocode_location_type || null,
+    geocoded_at: form.geocoded_at || (isManualOverride ? new Date().toISOString() : null),
+    manual_location_override: isManualOverride,
     notes: form.notes.trim(),
   };
 
@@ -540,6 +597,41 @@ useEffect(() => {
   setError("");
 
   try {
+    const geocodeAddress = fullAddressForGeocode(payload);
+    if (cachedEquipment && shouldUseCachedLocation(cachedEquipment)) {
+      payload.lat = Number(cachedEquipment.lat);
+      payload.lng = Number(cachedEquipment.lng);
+      payload.geocode_status = "success";
+      payload.geocode_source = cachedEquipment.geocode_source;
+      payload.geocode_formatted_address = cachedEquipment.geocode_formatted_address || null;
+      payload.geocode_place_id = cachedEquipment.geocode_place_id || null;
+      payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
+      payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
+      payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
+    } else {
+      const canGeocode = !isManualOverride && Boolean(payload.street_address?.trim()) && Boolean(payload.suburb?.trim());
+      const geocode = canGeocode ? await geocodeAddressWithGoogle(geocodeAddress) : null;
+      if (geocode?.lat != null && geocode?.lng != null) {
+        payload.lat = Number(geocode.lat);
+        payload.lng = Number(geocode.lng);
+        payload.geocode_status = "success";
+        payload.geocode_source = "google_geocode";
+        payload.geocode_formatted_address = geocode.formatted_address || null;
+        payload.geocode_place_id = geocode.place_id || null;
+        payload.geocode_location_type = geocode.location_type || null;
+        payload.geocoded_at = new Date().toISOString();
+        payload.manual_location_override = false;
+      } else if (canGeocode) {
+        payload.lat = fallbackLat;
+        payload.lng = fallbackLng;
+        payload.geocode_status = "failed";
+        if (!payload.geocode_source || payload.geocode_source === "none") {
+          payload.geocode_source = "suburb_default";
+        }
+        payload.manual_location_override = false;
+      }
+    }
+
     if (supabase) {
       const { data: authData } = await supabase.auth.getUser();
       const currentUser = authData?.user;
@@ -560,26 +652,7 @@ useEffect(() => {
         return;
       }
 
-      await supabase.from("equipment_master").upsert({
-        equipment_id: finalPayload.equipment_id,
-        customer_name: finalPayload.customer_name,
-        address: finalPayload.address,
-        street_address: finalPayload.street_address,
-        suburb: finalPayload.suburb,
-        state: finalPayload.state,
-        postcode: finalPayload.postcode,
-        country: finalPayload.country,
-        direction: finalPayload.direction,
-        lat: finalPayload.lat,
-        lng: finalPayload.lng,
-        updated_at: new Date().toISOString(),
-      });
-
       setOrders((prev) => [...prev, insertResult.data]);
-      setEquipment((prev) => ({
-        ...prev,
-        [finalPayload.equipment_id]: finalPayload,
-      }));
     } else {
       const localRow = {
         ...payload,
@@ -590,10 +663,6 @@ useEffect(() => {
       };
 
       setOrders((prev) => [...prev, localRow]);
-      setEquipment((prev) => ({
-        ...prev,
-        [payload.equipment_id]: payload,
-      }));
     }
 
     setForm(emptyForm());
@@ -632,8 +701,63 @@ useEffect(() => {
     await updateOrder(order.id, { status: "Delivered", delivered_at: deliveredAt });
 
     if (supabase && order.equipment_id && !String(order.id).startsWith("demo-")) {
-      await supabase.from("equipment_master").update({ last_delivery: deliveredAt, updated_at: deliveredAt }).eq("equipment_id", order.equipment_id);
+      const equipmentPayload = {
+        equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+        customer_name: order.customer_name || "",
+        address: order.address || order.street_address || "",
+        street_address: order.street_address || order.address || "",
+        suburb: order.suburb || "",
+        state: order.state || "SA",
+        postcode: order.postcode || "",
+        country: order.country || "Australia",
+        direction: order.direction || "",
+        lat: order.lat,
+        lng: order.lng,
+        last_delivery: deliveredAt,
+        updated_at: deliveredAt,
+        geocode_status: order.geocode_status ?? null,
+        geocode_source: order.geocode_source ?? null,
+        geocode_formatted_address: order.geocode_formatted_address ?? null,
+        geocode_place_id: order.geocode_place_id ?? null,
+        geocode_location_type: order.geocode_location_type ?? null,
+        geocoded_at: order.geocoded_at ?? null,
+        manual_location_override: order.manual_location_override ?? false,
+      };
+      const equipmentResult = await supabase
+        .from("equipment_master")
+        .upsert(equipmentPayload, { onConflict: "equipment_id" });
+      if (equipmentResult.error) {
+        setError(equipmentResult.error.message);
+        return;
+      }
     }
+
+    setEquipment((prev) => ({
+      ...prev,
+      [(order.equipment_id || "").trim().toUpperCase()]: {
+        ...(prev[(order.equipment_id || "").trim().toUpperCase()] || {}),
+        equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+        customer_name: order.customer_name || "",
+        address: order.address || order.street_address || "",
+        street_address: order.street_address || order.address || "",
+        suburb: order.suburb || "",
+        state: order.state || "SA",
+        postcode: order.postcode || "",
+        country: order.country || "Australia",
+        direction: order.direction || "",
+        lat: order.lat,
+        lng: order.lng,
+        last_delivery: deliveredAt,
+        updated_at: deliveredAt,
+        geocode_status: order.geocode_status ?? null,
+        geocode_source: order.geocode_source ?? null,
+        geocode_formatted_address: order.geocode_formatted_address ?? null,
+        geocode_place_id: order.geocode_place_id ?? null,
+        geocode_location_type: order.geocode_location_type ?? null,
+        geocoded_at: order.geocoded_at ?? null,
+        manual_location_override: order.manual_location_override ?? false,
+      },
+    }));
   }
 
   async function deleteOrder(order) {
@@ -677,8 +801,8 @@ if (supabase && !session) {
   );
 }
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50 text-slate-950">
+      <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">Toner Dispatch</div>
@@ -711,7 +835,7 @@ if (supabase && !session) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-3 pb-28 pt-4 sm:px-4">
+      <main className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4">
         {error && <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
         {!supabase && <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Demo mode: add Supabase environment variables to save shared data.</div>}
 
@@ -794,7 +918,7 @@ if (supabase && !session) {
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-lg backdrop-blur">
+      <nav className="z-40 shrink-0 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-lg backdrop-blur">
         <div className="mx-auto grid max-w-5xl grid-cols-4 gap-2">
           <BottomTab active={tab === "Board"} label="Board" icon={<Package className="h-5 w-5" />} onClick={() => setTab("Board")} />
           <BottomTab active={tab === "Map"} label="Map" icon={<MapPin className="h-5 w-5" />} onClick={() => setTab("Map")} />
@@ -1007,6 +1131,7 @@ function OrderCard({ order, mapProvider, suppressNavigationPrompt, onTake, onDel
             </div>
             <p className="mt-1 truncate text-sm font-bold text-slate-700">{order.customer_name}</p>
             {order.docket_no && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500">Docket {order.docket_no}</p>}
+            <p className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-600">{locationStatusLabel(order)}</p>
           </div>
 
           <div className="shrink-0 rounded-2xl bg-slate-100 px-3 py-2 text-center">
@@ -1172,9 +1297,12 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function handlePointerMove(event) {
     if (!pointersRef.current.has(event.pointerId)) return;
+    event.preventDefault();
     pointersRef.current.set(event.pointerId, pointFromEvent(event));
-    const points = Array.from(pointersRef.current.values());
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
 
+  function moveMapFromPoints(points) {
     if (points.length >= 2 && pinchRef.current) {
       const a = points[0];
       const b = points[1];
@@ -1201,6 +1329,44 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         y: dragRef.current.startCenterPx.y - dy,
       };
       setCenter(worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom));
+    }
+  }
+
+  function handleTouchStart(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+  }
+
+  function handleTouchMove(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
+
+  function handleTouchEnd(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+    else {
+      dragRef.current = null;
+      pinchRef.current = null;
     }
   }
 
@@ -1240,7 +1406,11 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" }}
       >
         <div className="absolute left-3 top-3 z-30 grid gap-2">
           <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomIn} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">+</button>
@@ -1352,6 +1522,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
               <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-2">
                 <div className="text-xs font-black">{order.equipment_id}</div>
                 <div className="mt-1 text-xs font-bold text-red-600">{order.toner_code}</div>
+                <div className="mt-1 text-[10px] font-black uppercase text-slate-500">{locationStatusLabel(order)}</div>
                 <div className="mt-1 text-xs text-slate-600">{waitingDays(order.created_at)} days · {order.status}</div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button type="button" onPointerDown={stopMapEvent} onClick={(e) => { stopMapEvent(e); openNavigation(order, mapProvider, suppressNavigationPrompt); }} className="col-span-2 flex items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black text-slate-900"><Navigation className="h-3 w-3" /> Navigate</button>
