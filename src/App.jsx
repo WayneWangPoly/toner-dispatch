@@ -1193,6 +1193,8 @@ function Info({ icon, text }) {
 }
 
 function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
+  const MAP_DRAG_SENSITIVITY = 0.35;
+  const MAP_DRAG_SMOOTHING = 0.65;
   const [center, setCenter] = useState(ADELAIDE_CENTER);
   const [zoom, setZoom] = useState(MAP_ZOOM);
   const [openMarkerKey, setOpenMarkerKey] = useState(null);
@@ -1313,13 +1315,55 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
     if (points.length === 1 && dragRef.current) {
       const point = points[0];
-      const dx = point.x - dragRef.current.startPoint.x;
-      const dy = point.y - dragRef.current.startPoint.y;
+      const dx = (point.x - dragRef.current.startPoint.x) * MAP_DRAG_SENSITIVITY;
+      const dy = (point.y - dragRef.current.startPoint.y) * MAP_DRAG_SENSITIVITY;
       const nextPx = {
         x: dragRef.current.startCenterPx.x - dx,
         y: dragRef.current.startCenterPx.y - dy,
       };
-      setCenter(worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom));
+      const nextCenter = worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom);
+      setCenter((current) => ({
+        lat: current.lat + (nextCenter.lat - current.lat) * MAP_DRAG_SMOOTHING,
+        lng: current.lng + (nextCenter.lng - current.lng) * MAP_DRAG_SMOOTHING,
+      }));
+    }
+  }
+
+  function handleTouchStart(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+  }
+
+  function handleTouchMove(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
+
+  function handleTouchEnd(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+    else {
+      dragRef.current = null;
+      pinchRef.current = null;
     }
   }
 
