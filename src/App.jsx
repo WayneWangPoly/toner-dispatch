@@ -792,8 +792,8 @@ if (supabase && !session) {
   );
 }
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50 text-slate-950">
+      <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">Toner Dispatch</div>
@@ -826,7 +826,7 @@ if (supabase && !session) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-3 pb-28 pt-4 sm:px-4">
+      <main className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4">
         {error && <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
         {!supabase && <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Demo mode: add Supabase environment variables to save shared data.</div>}
 
@@ -909,7 +909,7 @@ if (supabase && !session) {
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-lg backdrop-blur">
+      <nav className="z-40 shrink-0 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-lg backdrop-blur">
         <div className="mx-auto grid max-w-5xl grid-cols-4 gap-2">
           <BottomTab active={tab === "Board"} label="Board" icon={<Package className="h-5 w-5" />} onClick={() => setTab("Board")} />
           <BottomTab active={tab === "Map"} label="Map" icon={<MapPin className="h-5 w-5" />} onClick={() => setTab("Map")} />
@@ -1288,9 +1288,12 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function handlePointerMove(event) {
     if (!pointersRef.current.has(event.pointerId)) return;
+    event.preventDefault();
     pointersRef.current.set(event.pointerId, pointFromEvent(event));
-    const points = Array.from(pointersRef.current.values());
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
 
+  function moveMapFromPoints(points) {
     if (points.length >= 2 && pinchRef.current) {
       const a = points[0];
       const b = points[1];
@@ -1317,6 +1320,44 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         y: dragRef.current.startCenterPx.y - dy,
       };
       setCenter(worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom));
+    }
+  }
+
+  function handleTouchStart(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+  }
+
+  function handleTouchMove(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
+
+  function handleTouchEnd(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+    else {
+      dragRef.current = null;
+      pinchRef.current = null;
     }
   }
 
@@ -1356,7 +1397,11 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" }}
       >
         <div className="absolute left-3 top-3 z-30 grid gap-2">
           <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomIn} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">+</button>
