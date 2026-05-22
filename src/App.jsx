@@ -234,8 +234,26 @@ function navigationQuery(order) {
   return [street, order.suburb, state, order.postcode, country].filter(Boolean).join(", ");
 }
 
+function fullAddressForGeocode(source = {}) {
+  const street = source.street_address || source.address || "";
+  const state = source.state || "SA";
+  const country = source.country || "Australia";
+  return [street, source.suburb, state, source.postcode, country].filter(Boolean).join(", ");
+}
+
+function hasUsableLatLng(source = {}) {
+  return Number.isFinite(Number(source.lat)) && Number.isFinite(Number(source.lng));
+}
+
+function shouldUseCachedLocation(record = {}) {
+  return ["google_geocode", "manual_override"].includes(record.geocode_source) && hasUsableLatLng(record);
+}
+
 function navigationUrl(provider, order) {
-  const query = encodeURIComponent(navigationQuery(order));
+  const destination = hasUsableLatLng(order)
+    ? `${Number(order.lat)},${Number(order.lng)}`
+    : navigationQuery(order);
+  const query = encodeURIComponent(destination);
   if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
   if (provider === "Waze") return `https://waze.com/ul?q=${query}&navigate=yes`;
   return `https://www.google.com/maps/dir/?api=1&destination=${query}`;
@@ -254,24 +272,6 @@ function addressGroupKey(order) {
   return [cleanAddress(order.street_address || order.address), normalizeSuburb(order.suburb), order.state || ""].join("|");
 }
 
-function hashString(value = "") {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function offsetLatLng(lat, lng, seed, strength = 0.006) {
-  const angle = (hashString(seed) % 360) * (Math.PI / 180);
-  const radius = ((hashString(seed + "radius") % 100) / 100) * strength + strength * 0.25;
-  return {
-    lat: lat + Math.sin(angle) * radius,
-    lng: lng + Math.cos(angle) * radius,
-  };
-}
-
 function groupOrdersForMap(orders) {
   const groups = new Map();
   orders.forEach((order) => {
@@ -284,7 +284,6 @@ function groupOrdersForMap(orders) {
     const first = group[0];
     const baseLat = toNumber(first.lat, ADELAIDE_CENTER.lat);
     const baseLng = toNumber(first.lng, ADELAIDE_CENTER.lng);
-    const adjusted = offsetLatLng(baseLat, baseLng, key, 0.0045);
     const urgentCount = group.filter((o) => o.priority === "High" || waitingDays(o.created_at) >= 5).length;
     const takenCount = group.filter((o) => o.status === "Taken").length;
     return {
@@ -294,10 +293,17 @@ function groupOrdersForMap(orders) {
       count: group.length,
       urgentCount,
       takenCount,
-      lat: adjusted.lat,
-      lng: adjusted.lng,
+      lat: baseLat,
+      lng: baseLng,
     };
   });
+}
+
+function locationStatusLabel(order) {
+  if (order.manual_location_override || order.geocode_source === "manual_override") return "manual confirmed";
+  if (order.geocode_source === "google_geocode") return `Google ${order.geocode_location_type || "APPROXIMATE"}`;
+  if (order.geocode_source === "suburb_default") return "suburb approximate";
+  return "location unverified";
 }
 
 export default function TonerDispatchMVP() {
@@ -337,6 +343,15 @@ export default function TonerDispatchMVP() {
   function setSuppressNavigationPrompt(value) {
     setSuppressNavigationPromptState(value);
     setStoredPreference("toner_nav_prompt", value ? "hide" : "show");
+  }
+
+  async function geocodeAddressWithGoogle(address) {
+    if (!supabase || !address?.trim()) return null;
+    const { data, error } = await supabase.functions.invoke("geocode-address", {
+      body: { address: address.trim() },
+    });
+    if (error) return null;
+    return data || null;
   }
 
   useEffect(() => {
@@ -381,6 +396,7 @@ useEffect(() => {
     if (!equipmentResult.error) {
       const master = {};
       (equipmentResult.data || []).forEach((row) => {
+        if (!row.last_delivery) return;
         master[row.equipment_id] = row;
       });
       setEquipment(master);
@@ -500,9 +516,16 @@ useEffect(() => {
 
   const defaults = suburbDefaults[normalizeSuburb(form.suburb)] || {};
 
+  const equipmentKey = form.equipment_id.trim().toUpperCase();
+  const cachedEquipment = equipment[equipmentKey] || null;
+  const hasSuburbDefault = Number.isFinite(Number(defaults.lat)) && Number.isFinite(Number(defaults.lng));
+  const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
+  const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
+  const isManualOverride = hasUsableLatLng(form) && (form.lat !== "" || form.lng !== "");
+
   const payload = {
     docket_no: form.docket_no.trim(),
-    equipment_id: form.equipment_id.trim().toUpperCase(),
+    equipment_id: equipmentKey,
     customer_name: form.customer_name.trim(),
     address: (form.street_address || form.address).trim(),
     street_address: (form.street_address || form.address).trim(),
@@ -519,8 +542,15 @@ useEffect(() => {
     taken_at: null,
     delivered_at: null,
     created_at: new Date().toISOString(),
-    lat: toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat),
-    lng: toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng),
+    lat: fallbackLat,
+    lng: fallbackLng,
+    geocode_status: isManualOverride ? "success" : "pending",
+    geocode_source: isManualOverride ? "manual_override" : hasSuburbDefault ? "suburb_default" : "none",
+    geocode_formatted_address: null,
+    geocode_place_id: null,
+    geocode_location_type: null,
+    geocoded_at: isManualOverride ? new Date().toISOString() : null,
+    manual_location_override: isManualOverride,
     notes: form.notes.trim(),
   };
 
@@ -540,6 +570,38 @@ useEffect(() => {
   setError("");
 
   try {
+    const geocodeAddress = fullAddressForGeocode(payload);
+    if (cachedEquipment && shouldUseCachedLocation(cachedEquipment)) {
+      payload.lat = Number(cachedEquipment.lat);
+      payload.lng = Number(cachedEquipment.lng);
+      payload.geocode_status = "success";
+      payload.geocode_source = cachedEquipment.geocode_source;
+      payload.geocode_formatted_address = cachedEquipment.geocode_formatted_address || null;
+      payload.geocode_place_id = cachedEquipment.geocode_place_id || null;
+      payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
+      payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
+      payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
+    } else if (hasSuburbDefault || isManualOverride) {
+      const geocode = !isManualOverride ? await geocodeAddressWithGoogle(geocodeAddress) : null;
+      if (geocode?.lat != null && geocode?.lng != null) {
+        payload.lat = Number(geocode.lat);
+        payload.lng = Number(geocode.lng);
+        payload.geocode_status = "success";
+        payload.geocode_source = "google_geocode";
+        payload.geocode_formatted_address = geocode.formatted_address || null;
+        payload.geocode_place_id = geocode.place_id || null;
+        payload.geocode_location_type = geocode.location_type || null;
+        payload.geocoded_at = new Date().toISOString();
+        payload.manual_location_override = false;
+      } else if (!isManualOverride) {
+        payload.lat = fallbackLat;
+        payload.lng = fallbackLng;
+        payload.geocode_status = "failed";
+        payload.geocode_source = "suburb_default";
+        payload.manual_location_override = false;
+      }
+    }
+
     if (supabase) {
       const { data: authData } = await supabase.auth.getUser();
       const currentUser = authData?.user;
@@ -560,26 +622,7 @@ useEffect(() => {
         return;
       }
 
-      await supabase.from("equipment_master").upsert({
-        equipment_id: finalPayload.equipment_id,
-        customer_name: finalPayload.customer_name,
-        address: finalPayload.address,
-        street_address: finalPayload.street_address,
-        suburb: finalPayload.suburb,
-        state: finalPayload.state,
-        postcode: finalPayload.postcode,
-        country: finalPayload.country,
-        direction: finalPayload.direction,
-        lat: finalPayload.lat,
-        lng: finalPayload.lng,
-        updated_at: new Date().toISOString(),
-      });
-
       setOrders((prev) => [...prev, insertResult.data]);
-      setEquipment((prev) => ({
-        ...prev,
-        [finalPayload.equipment_id]: finalPayload,
-      }));
     } else {
       const localRow = {
         ...payload,
@@ -590,10 +633,6 @@ useEffect(() => {
       };
 
       setOrders((prev) => [...prev, localRow]);
-      setEquipment((prev) => ({
-        ...prev,
-        [payload.equipment_id]: payload,
-      }));
     }
 
     setForm(emptyForm());
@@ -632,8 +671,57 @@ useEffect(() => {
     await updateOrder(order.id, { status: "Delivered", delivered_at: deliveredAt });
 
     if (supabase && order.equipment_id && !String(order.id).startsWith("demo-")) {
-      await supabase.from("equipment_master").update({ last_delivery: deliveredAt, updated_at: deliveredAt }).eq("equipment_id", order.equipment_id);
+      const equipmentPayload = {
+        equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+        customer_name: order.customer_name || "",
+        address: order.address || order.street_address || "",
+        street_address: order.street_address || order.address || "",
+        suburb: order.suburb || "",
+        state: order.state || "SA",
+        postcode: order.postcode || "",
+        country: order.country || "Australia",
+        direction: order.direction || "",
+        lat: order.lat,
+        lng: order.lng,
+        last_delivery: deliveredAt,
+        updated_at: deliveredAt,
+        geocode_status: order.geocode_status ?? null,
+        geocode_source: order.geocode_source ?? null,
+        geocode_formatted_address: order.geocode_formatted_address ?? null,
+        geocode_place_id: order.geocode_place_id ?? null,
+        geocode_location_type: order.geocode_location_type ?? null,
+        geocoded_at: order.geocoded_at ?? null,
+        manual_location_override: order.manual_location_override ?? false,
+      };
+      await supabase.from("equipment_master").upsert(equipmentPayload);
     }
+
+    setEquipment((prev) => ({
+      ...prev,
+      [(order.equipment_id || "").trim().toUpperCase()]: {
+        ...(prev[(order.equipment_id || "").trim().toUpperCase()] || {}),
+        equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+        customer_name: order.customer_name || "",
+        address: order.address || order.street_address || "",
+        street_address: order.street_address || order.address || "",
+        suburb: order.suburb || "",
+        state: order.state || "SA",
+        postcode: order.postcode || "",
+        country: order.country || "Australia",
+        direction: order.direction || "",
+        lat: order.lat,
+        lng: order.lng,
+        last_delivery: deliveredAt,
+        updated_at: deliveredAt,
+        geocode_status: order.geocode_status ?? null,
+        geocode_source: order.geocode_source ?? null,
+        geocode_formatted_address: order.geocode_formatted_address ?? null,
+        geocode_place_id: order.geocode_place_id ?? null,
+        geocode_location_type: order.geocode_location_type ?? null,
+        geocoded_at: order.geocoded_at ?? null,
+        manual_location_override: order.manual_location_override ?? false,
+      },
+    }));
   }
 
   async function deleteOrder(order) {
@@ -1007,6 +1095,7 @@ function OrderCard({ order, mapProvider, suppressNavigationPrompt, onTake, onDel
             </div>
             <p className="mt-1 truncate text-sm font-bold text-slate-700">{order.customer_name}</p>
             {order.docket_no && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500">Docket {order.docket_no}</p>}
+            <p className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-600">{locationStatusLabel(order)}</p>
           </div>
 
           <div className="shrink-0 rounded-2xl bg-slate-100 px-3 py-2 text-center">
@@ -1352,6 +1441,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
               <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-2">
                 <div className="text-xs font-black">{order.equipment_id}</div>
                 <div className="mt-1 text-xs font-bold text-red-600">{order.toner_code}</div>
+                <div className="mt-1 text-[10px] font-black uppercase text-slate-500">{locationStatusLabel(order)}</div>
                 <div className="mt-1 text-xs text-slate-600">{waitingDays(order.created_at)} days · {order.status}</div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button type="button" onPointerDown={stopMapEvent} onClick={(e) => { stopMapEvent(e); openNavigation(order, mapProvider, suppressNavigationPrompt); }} className="col-span-2 flex items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black text-slate-900"><Navigation className="h-3 w-3" /> Navigate</button>
