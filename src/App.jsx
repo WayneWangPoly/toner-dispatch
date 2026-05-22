@@ -152,6 +152,13 @@ function emptyForm() {
     notes: "",
     lat: "",
     lng: "",
+    geocode_status: "pending",
+    geocode_source: "none",
+    geocode_formatted_address: "",
+    geocode_place_id: "",
+    geocode_location_type: "",
+    geocoded_at: "",
+    manual_location_override: false,
   };
 }
 
@@ -255,7 +262,10 @@ function navigationUrl(provider, order) {
     : navigationQuery(order);
   const query = encodeURIComponent(destination);
   if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
-  if (provider === "Waze") return `https://waze.com/ul?q=${query}&navigate=yes`;
+  if (provider === "Waze") {
+    if (hasCoords) return `https://waze.com/ul?ll=${query}&navigate=yes`;
+    return `https://waze.com/ul?q=${query}&navigate=yes`;
+  }
   return `https://www.google.com/maps/dir/?api=1&destination=${query}`;
 }
 
@@ -486,6 +496,13 @@ useEffect(() => {
         next.direction = found.direction || "";
         next.lat = found.lat || "";
         next.lng = found.lng || "";
+        next.geocode_status = found.geocode_status || "pending";
+        next.geocode_source = found.geocode_source || "none";
+        next.geocode_formatted_address = found.geocode_formatted_address || "";
+        next.geocode_place_id = found.geocode_place_id || "";
+        next.geocode_location_type = found.geocode_location_type || "";
+        next.geocoded_at = found.geocoded_at || "";
+        next.manual_location_override = Boolean(found.manual_location_override);
       }
     }
 
@@ -504,9 +521,19 @@ useEffect(() => {
         next.direction = defaults.direction;
         next.lat = String(defaults.lat);
         next.lng = String(defaults.lng);
+        next.geocode_source = "suburb_default";
+        next.geocode_status = "pending";
+        next.geocode_location_type = "APPROXIMATE";
+        next.manual_location_override = false;
       } else {
         next.suburb = value;
       }
+    }
+    if (field === "lat" || field === "lng") {
+      next.geocode_source = "manual_override";
+      next.geocode_status = "success";
+      next.manual_location_override = true;
+      next.geocoded_at = new Date().toISOString();
     }
     setForm(next);
   }
