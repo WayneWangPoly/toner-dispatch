@@ -1507,7 +1507,15 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
           <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomOut} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">−</button>
         </div>
 
-        <div className="absolute left-1/2 top-1/2" style={{ width: map.size, height: map.size, transform: "translate(-50%, -50%)" }}>
+        <div
+          className="absolute left-0 top-0"
+          style={{
+            width: map.size,
+            height: map.size,
+            transform: `translate(${-map.centerOffset.x}px, ${-map.centerOffset.y}px)`,
+            willChange: "transform",
+          }}
+        >
           {map.tiles.map((tile) => (
             <img
               key={`${zoom}-${tile.x}-${tile.y}`}
@@ -1545,6 +1553,10 @@ function buildTileMap(center, zoom, radius) {
   const topLeftTileX = centerTileX - radius;
   const topLeftTileY = centerTileY - radius;
   const origin = { x: topLeftTileX * TILE_SIZE, y: topLeftTileY * TILE_SIZE };
+  const centerOffset = {
+    x: centerPx.x - origin.x,
+    y: centerPx.y - origin.y,
+  };
 
   for (let x = centerTileX - radius; x <= centerTileX + radius; x += 1) {
     for (let y = centerTileY - radius; y <= centerTileY + radius; y += 1) {
@@ -1552,7 +1564,7 @@ function buildTileMap(center, zoom, radius) {
     }
   }
 
-  return { tiles, size, origin };
+  return { tiles, size, origin, centerOffset };
 }
 
 function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
