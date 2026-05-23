@@ -1202,14 +1202,69 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
   const pointersRef = useRef(new Map());
   const dragRef = useRef(null);
   const pinchRef = useRef(null);
+  const latestCenterRef = useRef(ADELAIDE_CENTER);
+  const targetCenterRef = useRef(ADELAIDE_CENTER);
+  const mapAnimationRef = useRef(null);
   const map = useMemo(() => buildTileMap(center, zoom, 3), [center, zoom]);
   const groups = useMemo(() => groupOrdersForMap(orders), [orders]);
+
+  function stopMapAnimation() {
+    if (mapAnimationRef.current != null) {
+      cancelAnimationFrame(mapAnimationRef.current);
+      mapAnimationRef.current = null;
+    }
+  }
+
+  function setMapCenterImmediate(nextCenter) {
+    stopMapAnimation();
+    latestCenterRef.current = nextCenter;
+    targetCenterRef.current = nextCenter;
+    setCenter(nextCenter);
+  }
+
+  function animateMapToTarget() {
+    const current = latestCenterRef.current;
+    const target = targetCenterRef.current;
+    const next = {
+      lat: current.lat + (target.lat - current.lat) * MAP_DRAG_EASING,
+      lng: current.lng + (target.lng - current.lng) * MAP_DRAG_EASING,
+    };
+    const isClose = Math.abs(target.lat - next.lat) < 0.00001 && Math.abs(target.lng - next.lng) < 0.00001;
+
+    if (isClose) {
+      latestCenterRef.current = target;
+      setCenter(target);
+      mapAnimationRef.current = null;
+      return;
+    }
+
+    latestCenterRef.current = next;
+    setCenter(next);
+    mapAnimationRef.current = requestAnimationFrame(animateMapToTarget);
+  }
+
+  function setMapCenterSmooth(nextCenter) {
+    targetCenterRef.current = nextCenter;
+    if (mapAnimationRef.current == null) {
+      mapAnimationRef.current = requestAnimationFrame(animateMapToTarget);
+    }
+  }
+
+  useEffect(() => {
+    latestCenterRef.current = center;
+  }, [center]);
+
+  useEffect(() => {
+    return () => {
+      stopMapAnimation();
+    };
+  }, []);
 
   useEffect(() => {
     if (lastAreaRef.current === area) return;
     lastAreaRef.current = area;
     const focus = directionFocus[area] || directionFocus.All;
-    setCenter({ lat: focus.lat, lng: focus.lng });
+    setMapCenterImmediate({ lat: focus.lat, lng: focus.lng });
     setZoom(focus.zoom);
     setOpenMarkerKey(null);
     pointersRef.current.clear();
@@ -1227,7 +1282,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function resetMap() {
     const focus = directionFocus[area] || directionFocus.All;
-    setCenter({ lat: focus.lat, lng: focus.lng });
+    setMapCenterImmediate({ lat: focus.lat, lng: focus.lng });
     setZoom(focus.zoom);
     setOpenMarkerKey(null);
     pointersRef.current.clear();
@@ -1250,7 +1305,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
   function startDrag(point) {
     dragRef.current = {
       startPoint: point,
-      startCenterPx: latLngToWorldPixels(center.lat, center.lng, zoom),
+      startCenterPx: latLngToWorldPixels(latestCenterRef.current.lat, latestCenterRef.current.lng, zoom),
       zoom,
     };
     pinchRef.current = null;
@@ -1309,7 +1364,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
       const nextPx = { x: baseCenterPx.x - dx, y: baseCenterPx.y - dy };
 
       setZoom(nextZoom);
-      setCenter(worldPixelsToLatLng(nextPx.x, nextPx.y, nextZoom));
+      setMapCenterImmediate(worldPixelsToLatLng(nextPx.x, nextPx.y, nextZoom));
       return;
     }
 
