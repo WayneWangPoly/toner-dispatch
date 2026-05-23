@@ -257,8 +257,9 @@ function shouldUseCachedLocation(record = {}) {
 }
 
 function navigationUrl(provider, order) {
-  const hasCoords = hasUsableLatLng(order);
-  const destination = hasCoords ? `${Number(order.lat)},${Number(order.lng)}` : navigationQuery(order);
+  const destination = hasUsableLatLng(order)
+    ? `${Number(order.lat)},${Number(order.lng)}`
+    : navigationQuery(order);
   const query = encodeURIComponent(destination);
   if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
   if (provider === "Waze") {
@@ -406,9 +407,7 @@ useEffect(() => {
       const master = {};
       (equipmentResult.data || []).forEach((row) => {
         if (!row.last_delivery) return;
-        const key = (row.equipment_id || "").trim().toUpperCase();
-        if (!key) return;
-        master[key] = row;
+        master[row.equipment_id] = row;
       });
       setEquipment(master);
     }
@@ -546,9 +545,10 @@ useEffect(() => {
 
   const equipmentKey = form.equipment_id.trim().toUpperCase();
   const cachedEquipment = equipment[equipmentKey] || null;
+  const hasSuburbDefault = Number.isFinite(Number(defaults.lat)) && Number.isFinite(Number(defaults.lng));
   const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
   const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
-  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+  const isManualOverride = hasUsableLatLng(form) && (form.lat !== "" || form.lng !== "");
 
   const payload = {
     docket_no: form.docket_no.trim(),
@@ -571,12 +571,12 @@ useEffect(() => {
     created_at: new Date().toISOString(),
     lat: fallbackLat,
     lng: fallbackLng,
-    geocode_status: form.geocode_status || (isManualOverride ? "success" : "pending"),
-    geocode_source: form.geocode_source || (isManualOverride ? "manual_override" : "none"),
-    geocode_formatted_address: form.geocode_formatted_address || null,
-    geocode_place_id: form.geocode_place_id || null,
-    geocode_location_type: form.geocode_location_type || null,
-    geocoded_at: form.geocoded_at || (isManualOverride ? new Date().toISOString() : null),
+    geocode_status: isManualOverride ? "success" : "pending",
+    geocode_source: isManualOverride ? "manual_override" : hasSuburbDefault ? "suburb_default" : "none",
+    geocode_formatted_address: null,
+    geocode_place_id: null,
+    geocode_location_type: null,
+    geocoded_at: isManualOverride ? new Date().toISOString() : null,
     manual_location_override: isManualOverride,
     notes: form.notes.trim(),
   };
@@ -608,9 +608,8 @@ useEffect(() => {
       payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
       payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
       payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
-    } else {
-      const canGeocode = !isManualOverride && Boolean(payload.street_address?.trim()) && Boolean(payload.suburb?.trim());
-      const geocode = canGeocode ? await geocodeAddressWithGoogle(geocodeAddress) : null;
+    } else if (hasSuburbDefault || isManualOverride) {
+      const geocode = !isManualOverride ? await geocodeAddressWithGoogle(geocodeAddress) : null;
       if (geocode?.lat != null && geocode?.lng != null) {
         payload.lat = Number(geocode.lat);
         payload.lng = Number(geocode.lng);
@@ -621,13 +620,11 @@ useEffect(() => {
         payload.geocode_location_type = geocode.location_type || null;
         payload.geocoded_at = new Date().toISOString();
         payload.manual_location_override = false;
-      } else if (canGeocode) {
+      } else if (!isManualOverride) {
         payload.lat = fallbackLat;
         payload.lng = fallbackLng;
         payload.geocode_status = "failed";
-        if (!payload.geocode_source || payload.geocode_source === "none") {
-          payload.geocode_source = "suburb_default";
-        }
+        payload.geocode_source = "suburb_default";
         payload.manual_location_override = false;
       }
     }
@@ -723,13 +720,7 @@ useEffect(() => {
         geocoded_at: order.geocoded_at ?? null,
         manual_location_override: order.manual_location_override ?? false,
       };
-      const equipmentResult = await supabase
-        .from("equipment_master")
-        .upsert(equipmentPayload, { onConflict: "equipment_id" });
-      if (equipmentResult.error) {
-        setError(equipmentResult.error.message);
-        return;
-      }
+      await supabase.from("equipment_master").upsert(equipmentPayload);
     }
 
     setEquipment((prev) => ({
@@ -1202,8 +1193,8 @@ function Info({ icon, text }) {
 }
 
 function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
-  const MAP_DRAG_SENSITIVITY = 0.55;
-  const MAP_DRAG_EASING = 0.22;
+  const MAP_DRAG_SENSITIVITY = 0.35;
+  const MAP_DRAG_SMOOTHING = 0.65;
   const [center, setCenter] = useState(ADELAIDE_CENTER);
   const [zoom, setZoom] = useState(MAP_ZOOM);
   const [openMarkerKey, setOpenMarkerKey] = useState(null);
@@ -1386,7 +1377,48 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         y: dragRef.current.startCenterPx.y - dy,
       };
       const nextCenter = worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom);
-      setMapCenterSmooth(nextCenter);
+      setCenter((current) => ({
+        lat: current.lat + (nextCenter.lat - current.lat) * MAP_DRAG_SMOOTHING,
+        lng: current.lng + (nextCenter.lng - current.lng) * MAP_DRAG_SMOOTHING,
+      }));
+    }
+  }
+
+  function handleTouchStart(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+  }
+
+  function handleTouchMove(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
+
+  function handleTouchEnd(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+    else {
+      dragRef.current = null;
+      pinchRef.current = null;
     }
   }
 
