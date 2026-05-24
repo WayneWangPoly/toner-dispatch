@@ -152,6 +152,13 @@ function emptyForm() {
     notes: "",
     lat: "",
     lng: "",
+    geocode_status: "pending",
+    geocode_source: "none",
+    geocode_formatted_address: "",
+    geocode_place_id: "",
+    geocode_location_type: "",
+    geocoded_at: "",
+    manual_location_override: false,
   };
 }
 
@@ -234,10 +241,30 @@ function navigationQuery(order) {
   return [street, order.suburb, state, order.postcode, country].filter(Boolean).join(", ");
 }
 
+function fullAddressForGeocode(source = {}) {
+  const street = source.street_address || source.address || "";
+  const state = source.state || "SA";
+  const country = source.country || "Australia";
+  return [street, source.suburb, state, source.postcode, country].filter(Boolean).join(", ");
+}
+
+function hasUsableLatLng(source = {}) {
+  return Number.isFinite(Number(source.lat)) && Number.isFinite(Number(source.lng));
+}
+
+function shouldUseCachedLocation(record = {}) {
+  return ["google_geocode", "manual_override"].includes(record.geocode_source) && hasUsableLatLng(record);
+}
+
 function navigationUrl(provider, order) {
-  const query = encodeURIComponent(navigationQuery(order));
+  const hasCoords = hasUsableLatLng(order);
+  const destination = hasCoords ? `${Number(order.lat)},${Number(order.lng)}` : navigationQuery(order);
+  const query = encodeURIComponent(destination);
   if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
-  if (provider === "Waze") return `https://waze.com/ul?q=${query}&navigate=yes`;
+  if (provider === "Waze") {
+    if (hasCoords) return `https://waze.com/ul?ll=${query}&navigate=yes`;
+    return `https://waze.com/ul?q=${query}&navigate=yes`;
+  }
   return `https://www.google.com/maps/dir/?api=1&destination=${query}`;
 }
 
@@ -254,24 +281,6 @@ function addressGroupKey(order) {
   return [cleanAddress(order.street_address || order.address), normalizeSuburb(order.suburb), order.state || ""].join("|");
 }
 
-function hashString(value = "") {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function offsetLatLng(lat, lng, seed, strength = 0.006) {
-  const angle = (hashString(seed) % 360) * (Math.PI / 180);
-  const radius = ((hashString(seed + "radius") % 100) / 100) * strength + strength * 0.25;
-  return {
-    lat: lat + Math.sin(angle) * radius,
-    lng: lng + Math.cos(angle) * radius,
-  };
-}
-
 function groupOrdersForMap(orders) {
   const groups = new Map();
   orders.forEach((order) => {
@@ -284,7 +293,6 @@ function groupOrdersForMap(orders) {
     const first = group[0];
     const baseLat = toNumber(first.lat, ADELAIDE_CENTER.lat);
     const baseLng = toNumber(first.lng, ADELAIDE_CENTER.lng);
-    const adjusted = offsetLatLng(baseLat, baseLng, key, 0.0045);
     const urgentCount = group.filter((o) => o.priority === "High" || waitingDays(o.created_at) >= 5).length;
     const takenCount = group.filter((o) => o.status === "Taken").length;
     return {
@@ -294,10 +302,17 @@ function groupOrdersForMap(orders) {
       count: group.length,
       urgentCount,
       takenCount,
-      lat: adjusted.lat,
-      lng: adjusted.lng,
+      lat: baseLat,
+      lng: baseLng,
     };
   });
+}
+
+function locationStatusLabel(order) {
+  if (order.manual_location_override || order.geocode_source === "manual_override") return "manual confirmed";
+  if (order.geocode_source === "google_geocode") return `Google ${order.geocode_location_type || "APPROXIMATE"}`;
+  if (order.geocode_source === "suburb_default") return "suburb approximate";
+  return "location unverified";
 }
 
 export default function TonerDispatchMVP() {
@@ -337,6 +352,15 @@ export default function TonerDispatchMVP() {
   function setSuppressNavigationPrompt(value) {
     setSuppressNavigationPromptState(value);
     setStoredPreference("toner_nav_prompt", value ? "hide" : "show");
+  }
+
+  async function geocodeAddressWithGoogle(address) {
+    if (!supabase || !address?.trim()) return null;
+    const { data, error } = await supabase.functions.invoke("geocode-address", {
+      body: { address: address.trim() },
+    });
+    if (error) return null;
+    return data || null;
   }
 
   useEffect(() => {
@@ -381,7 +405,10 @@ useEffect(() => {
     if (!equipmentResult.error) {
       const master = {};
       (equipmentResult.data || []).forEach((row) => {
-        master[row.equipment_id] = row;
+        if (!row.last_delivery) return;
+        const key = (row.equipment_id || "").trim().toUpperCase();
+        if (!key) return;
+        master[key] = row;
       });
       setEquipment(master);
     }
@@ -470,6 +497,13 @@ useEffect(() => {
         next.direction = found.direction || "";
         next.lat = found.lat || "";
         next.lng = found.lng || "";
+        next.geocode_status = found.geocode_status || "pending";
+        next.geocode_source = found.geocode_source || "none";
+        next.geocode_formatted_address = found.geocode_formatted_address || "";
+        next.geocode_place_id = found.geocode_place_id || "";
+        next.geocode_location_type = found.geocode_location_type || "";
+        next.geocoded_at = found.geocoded_at || "";
+        next.manual_location_override = Boolean(found.manual_location_override);
       }
     }
 
@@ -488,9 +522,19 @@ useEffect(() => {
         next.direction = defaults.direction;
         next.lat = String(defaults.lat);
         next.lng = String(defaults.lng);
+        next.geocode_source = "suburb_default";
+        next.geocode_status = "pending";
+        next.geocode_location_type = "APPROXIMATE";
+        next.manual_location_override = false;
       } else {
         next.suburb = value;
       }
+    }
+    if (field === "lat" || field === "lng") {
+      next.geocode_source = "manual_override";
+      next.geocode_status = "success";
+      next.manual_location_override = true;
+      next.geocoded_at = new Date().toISOString();
     }
     setForm(next);
   }
@@ -500,9 +544,15 @@ useEffect(() => {
 
   const defaults = suburbDefaults[normalizeSuburb(form.suburb)] || {};
 
+  const equipmentKey = form.equipment_id.trim().toUpperCase();
+  const cachedEquipment = equipment[equipmentKey] || null;
+  const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
+  const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
+  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+
   const payload = {
     docket_no: form.docket_no.trim(),
-    equipment_id: form.equipment_id.trim().toUpperCase(),
+    equipment_id: equipmentKey,
     customer_name: form.customer_name.trim(),
     address: (form.street_address || form.address).trim(),
     street_address: (form.street_address || form.address).trim(),
@@ -519,8 +569,15 @@ useEffect(() => {
     taken_at: null,
     delivered_at: null,
     created_at: new Date().toISOString(),
-    lat: toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat),
-    lng: toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng),
+    lat: fallbackLat,
+    lng: fallbackLng,
+    geocode_status: form.geocode_status || (isManualOverride ? "success" : "pending"),
+    geocode_source: form.geocode_source || (isManualOverride ? "manual_override" : "none"),
+    geocode_formatted_address: form.geocode_formatted_address || null,
+    geocode_place_id: form.geocode_place_id || null,
+    geocode_location_type: form.geocode_location_type || null,
+    geocoded_at: form.geocoded_at || (isManualOverride ? new Date().toISOString() : null),
+    manual_location_override: isManualOverride,
     notes: form.notes.trim(),
   };
 
@@ -531,7 +588,7 @@ useEffect(() => {
     !payload.direction ||
     !payload.toner_code
   ) {
-    setError("Please complete Equipment ID, Customer, Suburb, Direction and Toner Code before saving.");
+    setError("Please complete Equipment ID, Customer, Suburb, Direction and Product Code before saving.");
     return;
   }
 
@@ -540,6 +597,41 @@ useEffect(() => {
   setError("");
 
   try {
+    const geocodeAddress = fullAddressForGeocode(payload);
+    if (cachedEquipment && shouldUseCachedLocation(cachedEquipment)) {
+      payload.lat = Number(cachedEquipment.lat);
+      payload.lng = Number(cachedEquipment.lng);
+      payload.geocode_status = "success";
+      payload.geocode_source = cachedEquipment.geocode_source;
+      payload.geocode_formatted_address = cachedEquipment.geocode_formatted_address || null;
+      payload.geocode_place_id = cachedEquipment.geocode_place_id || null;
+      payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
+      payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
+      payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
+    } else {
+      const canGeocode = !isManualOverride && Boolean(payload.street_address?.trim()) && Boolean(payload.suburb?.trim());
+      const geocode = canGeocode ? await geocodeAddressWithGoogle(geocodeAddress) : null;
+      if (geocode?.lat != null && geocode?.lng != null) {
+        payload.lat = Number(geocode.lat);
+        payload.lng = Number(geocode.lng);
+        payload.geocode_status = "success";
+        payload.geocode_source = "google_geocode";
+        payload.geocode_formatted_address = geocode.formatted_address || null;
+        payload.geocode_place_id = geocode.place_id || null;
+        payload.geocode_location_type = geocode.location_type || null;
+        payload.geocoded_at = new Date().toISOString();
+        payload.manual_location_override = false;
+      } else if (canGeocode) {
+        payload.lat = fallbackLat;
+        payload.lng = fallbackLng;
+        payload.geocode_status = "failed";
+        if (!payload.geocode_source || payload.geocode_source === "none") {
+          payload.geocode_source = "suburb_default";
+        }
+        payload.manual_location_override = false;
+      }
+    }
+
     if (supabase) {
       const { data: authData } = await supabase.auth.getUser();
       const currentUser = authData?.user;
@@ -560,26 +652,7 @@ useEffect(() => {
         return;
       }
 
-      await supabase.from("equipment_master").upsert({
-        equipment_id: finalPayload.equipment_id,
-        customer_name: finalPayload.customer_name,
-        address: finalPayload.address,
-        street_address: finalPayload.street_address,
-        suburb: finalPayload.suburb,
-        state: finalPayload.state,
-        postcode: finalPayload.postcode,
-        country: finalPayload.country,
-        direction: finalPayload.direction,
-        lat: finalPayload.lat,
-        lng: finalPayload.lng,
-        updated_at: new Date().toISOString(),
-      });
-
       setOrders((prev) => [...prev, insertResult.data]);
-      setEquipment((prev) => ({
-        ...prev,
-        [finalPayload.equipment_id]: finalPayload,
-      }));
     } else {
       const localRow = {
         ...payload,
@@ -590,10 +663,6 @@ useEffect(() => {
       };
 
       setOrders((prev) => [...prev, localRow]);
-      setEquipment((prev) => ({
-        ...prev,
-        [payload.equipment_id]: payload,
-      }));
     }
 
     setForm(emptyForm());
@@ -632,8 +701,63 @@ useEffect(() => {
     await updateOrder(order.id, { status: "Delivered", delivered_at: deliveredAt });
 
     if (supabase && order.equipment_id && !String(order.id).startsWith("demo-")) {
-      await supabase.from("equipment_master").update({ last_delivery: deliveredAt, updated_at: deliveredAt }).eq("equipment_id", order.equipment_id);
+      const equipmentPayload = {
+        equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+        customer_name: order.customer_name || "",
+        address: order.address || order.street_address || "",
+        street_address: order.street_address || order.address || "",
+        suburb: order.suburb || "",
+        state: order.state || "SA",
+        postcode: order.postcode || "",
+        country: order.country || "Australia",
+        direction: order.direction || "",
+        lat: order.lat,
+        lng: order.lng,
+        last_delivery: deliveredAt,
+        updated_at: deliveredAt,
+        geocode_status: order.geocode_status ?? null,
+        geocode_source: order.geocode_source ?? null,
+        geocode_formatted_address: order.geocode_formatted_address ?? null,
+        geocode_place_id: order.geocode_place_id ?? null,
+        geocode_location_type: order.geocode_location_type ?? null,
+        geocoded_at: order.geocoded_at ?? null,
+        manual_location_override: order.manual_location_override ?? false,
+      };
+      const equipmentResult = await supabase
+        .from("equipment_master")
+        .upsert(equipmentPayload, { onConflict: "equipment_id" });
+      if (equipmentResult.error) {
+        setError(equipmentResult.error.message);
+        return;
+      }
     }
+
+    setEquipment((prev) => ({
+      ...prev,
+      [(order.equipment_id || "").trim().toUpperCase()]: {
+        ...(prev[(order.equipment_id || "").trim().toUpperCase()] || {}),
+        equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+        customer_name: order.customer_name || "",
+        address: order.address || order.street_address || "",
+        street_address: order.street_address || order.address || "",
+        suburb: order.suburb || "",
+        state: order.state || "SA",
+        postcode: order.postcode || "",
+        country: order.country || "Australia",
+        direction: order.direction || "",
+        lat: order.lat,
+        lng: order.lng,
+        last_delivery: deliveredAt,
+        updated_at: deliveredAt,
+        geocode_status: order.geocode_status ?? null,
+        geocode_source: order.geocode_source ?? null,
+        geocode_formatted_address: order.geocode_formatted_address ?? null,
+        geocode_place_id: order.geocode_place_id ?? null,
+        geocode_location_type: order.geocode_location_type ?? null,
+        geocoded_at: order.geocoded_at ?? null,
+        manual_location_override: order.manual_location_override ?? false,
+      },
+    }));
   }
 
   async function deleteOrder(order) {
@@ -677,8 +801,8 @@ if (supabase && !session) {
   );
 }
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50 text-slate-950">
+      <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">Toner Dispatch</div>
@@ -711,7 +835,7 @@ if (supabase && !session) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-3 pb-28 pt-4 sm:px-4">
+      <main className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4">
         {error && <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
         {!supabase && <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Demo mode: add Supabase environment variables to save shared data.</div>}
 
@@ -794,7 +918,7 @@ if (supabase && !session) {
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-lg backdrop-blur">
+      <nav className="z-40 shrink-0 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-lg backdrop-blur">
         <div className="mx-auto grid max-w-5xl grid-cols-4 gap-2">
           <BottomTab active={tab === "Board"} label="Board" icon={<Package className="h-5 w-5" />} onClick={() => setTab("Board")} />
           <BottomTab active={tab === "Map"} label="Map" icon={<MapPin className="h-5 w-5" />} onClick={() => setTab("Map")} />
@@ -1007,6 +1131,7 @@ function OrderCard({ order, mapProvider, suppressNavigationPrompt, onTake, onDel
             </div>
             <p className="mt-1 truncate text-sm font-bold text-slate-700">{order.customer_name}</p>
             {order.docket_no && <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500">Docket {order.docket_no}</p>}
+            <p className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-600">{locationStatusLabel(order)}</p>
           </div>
 
           <div className="shrink-0 rounded-2xl bg-slate-100 px-3 py-2 text-center">
@@ -1077,6 +1202,8 @@ function Info({ icon, text }) {
 }
 
 function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
+  const MAP_DRAG_SENSITIVITY = 0.55;
+  const MAP_DRAG_EASING = 0.22;
   const [center, setCenter] = useState(ADELAIDE_CENTER);
   const [zoom, setZoom] = useState(MAP_ZOOM);
   const [openMarkerKey, setOpenMarkerKey] = useState(null);
@@ -1084,14 +1211,69 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
   const pointersRef = useRef(new Map());
   const dragRef = useRef(null);
   const pinchRef = useRef(null);
+  const latestCenterRef = useRef(ADELAIDE_CENTER);
+  const targetCenterRef = useRef(ADELAIDE_CENTER);
+  const mapAnimationRef = useRef(null);
   const map = useMemo(() => buildTileMap(center, zoom, 3), [center, zoom]);
   const groups = useMemo(() => groupOrdersForMap(orders), [orders]);
+
+  function stopMapAnimation() {
+    if (mapAnimationRef.current != null) {
+      cancelAnimationFrame(mapAnimationRef.current);
+      mapAnimationRef.current = null;
+    }
+  }
+
+  function setMapCenterImmediate(nextCenter) {
+    stopMapAnimation();
+    latestCenterRef.current = nextCenter;
+    targetCenterRef.current = nextCenter;
+    setCenter(nextCenter);
+  }
+
+  function animateMapToTarget() {
+    const current = latestCenterRef.current;
+    const target = targetCenterRef.current;
+    const next = {
+      lat: current.lat + (target.lat - current.lat) * MAP_DRAG_EASING,
+      lng: current.lng + (target.lng - current.lng) * MAP_DRAG_EASING,
+    };
+    const isClose = Math.abs(target.lat - next.lat) < 0.00001 && Math.abs(target.lng - next.lng) < 0.00001;
+
+    if (isClose) {
+      latestCenterRef.current = target;
+      setCenter(target);
+      mapAnimationRef.current = null;
+      return;
+    }
+
+    latestCenterRef.current = next;
+    setCenter(next);
+    mapAnimationRef.current = requestAnimationFrame(animateMapToTarget);
+  }
+
+  function setMapCenterSmooth(nextCenter) {
+    targetCenterRef.current = nextCenter;
+    if (mapAnimationRef.current == null) {
+      mapAnimationRef.current = requestAnimationFrame(animateMapToTarget);
+    }
+  }
+
+  useEffect(() => {
+    latestCenterRef.current = center;
+  }, [center]);
+
+  useEffect(() => {
+    return () => {
+      stopMapAnimation();
+    };
+  }, []);
 
   useEffect(() => {
     if (lastAreaRef.current === area) return;
     lastAreaRef.current = area;
     const focus = directionFocus[area] || directionFocus.All;
-    setCenter({ lat: focus.lat, lng: focus.lng });
+    setMapCenterImmediate({ lat: focus.lat, lng: focus.lng });
     setZoom(focus.zoom);
     setOpenMarkerKey(null);
     pointersRef.current.clear();
@@ -1109,7 +1291,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function resetMap() {
     const focus = directionFocus[area] || directionFocus.All;
-    setCenter({ lat: focus.lat, lng: focus.lng });
+    setMapCenterImmediate({ lat: focus.lat, lng: focus.lng });
     setZoom(focus.zoom);
     setOpenMarkerKey(null);
     pointersRef.current.clear();
@@ -1132,7 +1314,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
   function startDrag(point) {
     dragRef.current = {
       startPoint: point,
-      startCenterPx: latLngToWorldPixels(center.lat, center.lng, zoom),
+      startCenterPx: latLngToWorldPixels(latestCenterRef.current.lat, latestCenterRef.current.lng, zoom),
       zoom,
     };
     pinchRef.current = null;
@@ -1172,9 +1354,12 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function handlePointerMove(event) {
     if (!pointersRef.current.has(event.pointerId)) return;
+    event.preventDefault();
     pointersRef.current.set(event.pointerId, pointFromEvent(event));
-    const points = Array.from(pointersRef.current.values());
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
 
+  function moveMapFromPoints(points) {
     if (points.length >= 2 && pinchRef.current) {
       const a = points[0];
       const b = points[1];
@@ -1188,19 +1373,58 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
       const nextPx = { x: baseCenterPx.x - dx, y: baseCenterPx.y - dy };
 
       setZoom(nextZoom);
-      setCenter(worldPixelsToLatLng(nextPx.x, nextPx.y, nextZoom));
+      setMapCenterImmediate(worldPixelsToLatLng(nextPx.x, nextPx.y, nextZoom));
       return;
     }
 
     if (points.length === 1 && dragRef.current) {
       const point = points[0];
-      const dx = point.x - dragRef.current.startPoint.x;
-      const dy = point.y - dragRef.current.startPoint.y;
+      const dx = (point.x - dragRef.current.startPoint.x) * MAP_DRAG_SENSITIVITY;
+      const dy = (point.y - dragRef.current.startPoint.y) * MAP_DRAG_SENSITIVITY;
       const nextPx = {
         x: dragRef.current.startCenterPx.x - dx,
         y: dragRef.current.startCenterPx.y - dy,
       };
-      setCenter(worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom));
+      const nextCenter = worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom);
+      setMapCenterSmooth(nextCenter);
+    }
+  }
+
+  function handleTouchStart(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+  }
+
+  function handleTouchMove(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
+
+  function handleTouchEnd(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+    else {
+      dragRef.current = null;
+      pinchRef.current = null;
     }
   }
 
@@ -1240,14 +1464,26 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" }}
       >
         <div className="absolute left-3 top-3 z-30 grid gap-2">
           <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomIn} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">+</button>
           <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomOut} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">−</button>
         </div>
 
-        <div className="absolute left-1/2 top-1/2" style={{ width: map.size, height: map.size, transform: "translate(-50%, -50%)" }}>
+        <div
+          className="absolute left-0 top-0"
+          style={{
+            width: map.size,
+            height: map.size,
+            transform: `translate(${-map.centerOffset.x}px, ${-map.centerOffset.y}px)`,
+            willChange: "transform",
+          }}
+        >
           {map.tiles.map((tile) => (
             <img
               key={`${zoom}-${tile.x}-${tile.y}`}
@@ -1285,6 +1521,10 @@ function buildTileMap(center, zoom, radius) {
   const topLeftTileX = centerTileX - radius;
   const topLeftTileY = centerTileY - radius;
   const origin = { x: topLeftTileX * TILE_SIZE, y: topLeftTileY * TILE_SIZE };
+  const centerOffset = {
+    x: centerPx.x - origin.x,
+    y: centerPx.y - origin.y,
+  };
 
   for (let x = centerTileX - radius; x <= centerTileX + radius; x += 1) {
     for (let y = centerTileY - radius; y <= centerTileY + radius; y += 1) {
@@ -1292,7 +1532,7 @@ function buildTileMap(center, zoom, radius) {
     }
   }
 
-  return { tiles, size, origin };
+  return { tiles, size, origin, centerOffset };
 }
 
 function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
@@ -1352,6 +1592,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
               <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-2">
                 <div className="text-xs font-black">{order.equipment_id}</div>
                 <div className="mt-1 text-xs font-bold text-red-600">{order.toner_code}</div>
+                <div className="mt-1 text-[10px] font-black uppercase text-slate-500">{locationStatusLabel(order)}</div>
                 <div className="mt-1 text-xs text-slate-600">{waitingDays(order.created_at)} days · {order.status}</div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button type="button" onPointerDown={stopMapEvent} onClick={(e) => { stopMapEvent(e); openNavigation(order, mapProvider, suppressNavigationPrompt); }} className="col-span-2 flex items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black text-slate-900"><Navigation className="h-3 w-3" /> Navigate</button>
@@ -1393,7 +1634,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
     </div>
   );
 }
-function ocrDigitsOnly(value = "") {
+function normaliseOcrToken(value = "") {
   return value
     .toUpperCase()
     .replace(/O/g, "0")
@@ -1405,120 +1646,80 @@ function ocrDigitsOnly(value = "") {
     .replace(/S/g, "5")
     .replace(/Z/g, "2")
     .replace(/B/g, "8")
-    .replace(/G/g, "6")
-    .replace(/[^0-9]/g, "");
-}
-
-function normaliseDocketNo(value = "") {
-  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-  if (cleaned.length < 4) return "";
-
-  const prefix = cleaned.slice(0, 2).replace(/0/g, "O").replace(/1/g, "I");
-  const digits = ocrDigitsOnly(cleaned.slice(2));
-
-  if (!/^[A-Z]{2}$/.test(prefix)) return "";
-  if (digits.length < 5) return "";
-
-  return `${prefix}${digits}`;
-}
-
-function normaliseEquipmentNo(value = "") {
-  const digits = ocrDigitsOnly(value);
-  return digits.length >= 4 ? digits : "";
+    .replace(/G/g, "6");
 }
 
 function extractDocketFieldsFromText(text = "") {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const fullText = lines.join("\n");
 
-  function matchOne(patterns) {
-    for (const pattern of patterns) {
-      const match = fullText.match(pattern);
-      if (match?.[1]) return match[1].trim();
+  const docketCandidates = normaliseOcrToken(fullText).match(/\b[A-Z]{2}\d{8}\b/g) || [];
+  const docket_no = docketCandidates[0] || "";
+
+  let equipment_id = "";
+  for (const line of lines) {
+    if (!/equipment|machine|serial/i.test(line)) continue;
+    const digits = normaliseOcrToken(line).replace(/[^0-9]/g, "");
+    const sixDigit = digits.match(/\b\d{6}\b/);
+    if (sixDigit) {
+      equipment_id = sixDigit[0];
+      break;
     }
-    return "";
   }
 
-  const rawDocketNo = matchOne([
-    /docket\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-\s]{6,20})/i,
-    /(?:delivery|dispatch)\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9\-\s]{6,20})/i,
-    /\b([A-Z]{2}[A-Z0-9]{5,12})\b/i,
-  ]);
+  const deliverIndex = lines.findIndex((line) => /deliver\s*to/i.test(line));
+  const deliverBlock = deliverIndex >= 0 ? lines.slice(deliverIndex, Math.min(lines.length, deliverIndex + 10)) : [];
 
-  const docket_no = normaliseDocketNo(rawDocketNo);
-
-  const rawEquipmentNo = matchOne([
-    /equipment\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-    /equip(?:ment)?\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-    /machine\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-    /serial\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-  ]);
-
-  const equipment_id = normaliseEquipmentNo(rawEquipmentNo);
-
-  const toner_code = matchOne([
-    /(?:toner|product|item|code)\s*(?:code|no|number)?\s*[:\-]?\s*([A-Z0-9\- ]{3,30})/i,
-    /\b(WT-[A-Z0-9]+)\b/i,
-    /\b(W\d{4,}[A-Z]{0,3})\b/i,
-  ]);
-
-  let customer_name = matchOne([
-    /deliver\s*to\s*[:\-]?\s*(.+)/i,
-    /customer\s*[:\-]?\s*(.+)/i,
-    /client\s*[:\-]?\s*(.+)/i,
-  ]);
-
-  let street_address = matchOne([
-    /address\s*[:\-]?\s*(.+)/i,
-  ]);
-
+  let customer_name = "";
+  let street_address = "";
   let suburb = "";
   let postcode = "";
   let state = "SA";
-  let country = "Australia";
+  const country = "Australia";
 
-  const postcodeLine = lines.find((line) =>
-    /\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+\d{4}\b/i.test(line)
-  );
+  if (deliverBlock.length > 0) {
+    const firstLine = deliverBlock[0].replace(/deliver\s*to\s*[:\-]?\s*/i, "").trim();
+    if (firstLine) customer_name = firstLine;
 
-  if (postcodeLine) {
-    const m = postcodeLine.match(/(.+?)\s+\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+(\d{4})\b/i);
-    if (m) {
-      suburb = m[1].trim();
-      state = m[2].toUpperCase();
-      postcode = m[3];
+    for (let i = 1; i < deliverBlock.length; i += 1) {
+      const line = deliverBlock[i];
+      if (!customer_name && line) {
+        customer_name = line;
+        continue;
+      }
+      if (!street_address && /^\d+\s+[A-Za-z]/.test(line)) {
+        street_address = line;
+        continue;
+      }
+      const m = line.match(/(.+?)\s+\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+(\d{4})\b/i);
+      if (m) {
+        suburb = m[1].trim();
+        state = m[2].toUpperCase();
+        postcode = m[3];
+        break;
+      }
     }
   }
+
   if (!suburb && suburbOptions.length > 0) {
-  const textForSearch = ` ${fullText.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
-
-  const matchedSuburb = suburbOptions.find((item) => {
-    const label = item.label.toLowerCase();
-    return textForSearch.includes(` ${label} `);
-  });
-
-  if (matchedSuburb) {
-    suburb = matchedSuburb.label;
-  }
-}
-  if (!street_address) {
-    const possibleAddress = lines.find((line) =>
-      /^\d+\s+[A-Za-z]/.test(line) &&
-      /(road|rd|street|st|avenue|ave|drive|dr|court|ct|terrace|tce|highway|hwy|lane|ln)/i.test(line)
-    );
-    street_address = possibleAddress || "";
+    const blockText = ` ${deliverBlock.join(" ").toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+    const matchedSuburb = suburbOptions.find((item) => blockText.includes(` ${item.label.toLowerCase()} `));
+    if (matchedSuburb) suburb = matchedSuburb.label;
   }
 
-  if (!customer_name) {
-    const deliverIndex = lines.findIndex((line) => /deliver\s*to/i.test(line));
-    if (deliverIndex >= 0 && lines[deliverIndex + 1]) {
-      customer_name = lines[deliverIndex + 1];
-    }
+  const productIndex = lines.findIndex((line) => /product\s*code/i.test(line));
+  const productSearch = productIndex >= 0 ? lines.slice(productIndex, Math.min(lines.length, productIndex + 8)) : [];
+  const productCodes = [];
+  const seen = new Set();
+  for (const line of productSearch) {
+    const matches = line.toUpperCase().match(/\b[A-Z0-9]{2,}(?:-[A-Z0-9]+)+\b|\bW\d{4,}[A-Z0-9]*\b/g) || [];
+    matches.forEach((code) => {
+      const cleaned = code.trim();
+      if (!seen.has(cleaned)) {
+        seen.add(cleaned);
+        productCodes.push(cleaned);
+      }
+    });
   }
 
   return {
@@ -1530,9 +1731,9 @@ function extractDocketFieldsFromText(text = "") {
     state,
     postcode,
     country,
-    toner_code: toner_code.trim().toUpperCase(),
+    toner_code: productCodes.join(", "),
     priority: "Normal",
-    notes: `OCR text:\n${fullText.slice(0, 1200)}`,
+    notes: "",
   };
 }
 
@@ -1681,14 +1882,14 @@ function HistoryView({ orders, filters, setFilters }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-black text-slate-950">History</h2>
-            <p className="mt-1 text-sm text-slate-500">Search by customer, date, toner/model, docket/equipment, or staff.</p>
+            <p className="mt-1 text-sm text-slate-500">Search by customer, date, product/model, docket/equipment, or staff.</p>
           </div>
           <button onClick={clearFilters} className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900">Clear</button>
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Field label="Customer" value={filters.customer} onChange={(v) => updateFilter("customer", v)} placeholder="Customer name" />
-          <Field label="Model / Toner / Equipment" value={filters.model} onChange={(v) => updateFilter("model", v)} placeholder="WT-202 / 290459 / TG67B" />
+          <Field label="Model / Product / Equipment" value={filters.model} onChange={(v) => updateFilter("model", v)} placeholder="WT-202 / 290459 / TG67B" />
           <Field label="From" type="date" value={filters.from} onChange={(v) => updateFilter("from", v)} />
           <Field label="To" type="date" value={filters.to} onChange={(v) => updateFilter("to", v)} />
           <label className="block sm:col-span-2">
@@ -1821,7 +2022,7 @@ function AddSheet({ form, updateForm, addOrder, close, saving }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Docket No" value={form.docket_no} onChange={(v) => updateForm("docket_no", v)} placeholder="e.g. AN06561284" />
           <Field label="Equipment ID" value={form.equipment_id} onChange={(v) => updateForm("equipment_id", v)} icon={<Search className="h-4 w-4" />} placeholder="Machine / Equipment ID" />
-          <Field label="Toner Code" value={form.toner_code} onChange={(v) => updateForm("toner_code", v)} icon={<Package className="h-4 w-4" />} placeholder="WT-B1 / W9060MC" />
+          <Field label="Product Code" value={form.toner_code} onChange={(v) => updateForm("toner_code", v)} icon={<Package className="h-4 w-4" />} placeholder="WT-B1 / W9060MC" />
           <Field label="Customer" value={form.customer_name} onChange={(v) => updateForm("customer_name", v)} placeholder="Customer name" />
           <Field label="Street address" value={form.street_address || form.address} onChange={(v) => updateForm("street_address", v)} placeholder="Street number and street name" />
           <SuburbSelect label="Suburb" value={form.suburb} onChange={(v) => updateForm("suburb", v)} />
