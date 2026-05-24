@@ -369,12 +369,81 @@ export default function TonerDispatchMVP() {
   }
 
   async function geocodeAddressWithGoogle(address) {
-  if (!SUPABASE_URL || !address?.trim()) {
+  const cleanAddress = address?.trim() || "";
+
+  if (!cleanAddress) {
     return {
       status: "failed",
       error: "Address is empty before geocoding",
       address,
     };
+  }
+
+  const body = { address: cleanAddress };
+  let lastFailure = null;
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.functions.invoke("geocode-address", {
+        body,
+      });
+
+      if (!error && data?.status === "success" && data?.lat != null && data?.lng != null) {
+        return data;
+      }
+
+      lastFailure = {
+        status: "failed",
+        error: error?.message || data?.error || "geocode-address returned no coordinates",
+        google_status: data?.google_status || "",
+        address: data?.address || cleanAddress,
+      };
+    } catch (error) {
+      lastFailure = {
+        status: "failed",
+        error: error?.message || "Supabase function invoke failed",
+        address: cleanAddress,
+      };
+    }
+  }
+
+  if (SUPABASE_URL) {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=UTF-8",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.status === "success" && data?.lat != null && data?.lng != null) {
+        return data;
+      }
+
+      lastFailure = {
+        status: "failed",
+        error: data?.error || `Geocode HTTP ${response.status}`,
+        google_status: data?.google_status || "",
+        address: data?.address || cleanAddress,
+      };
+    } catch (error) {
+      lastFailure = {
+        status: "failed",
+        error: error?.message || "Direct geocode fetch failed",
+        address: cleanAddress,
+      };
+    }
+  }
+
+  return lastFailure || {
+    status: "failed",
+    error: "No geocode request method was available",
+    address: cleanAddress,
+  };
+};
   }
 
   try {
