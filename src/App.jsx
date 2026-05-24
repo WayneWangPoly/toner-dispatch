@@ -621,11 +621,12 @@ useEffect(() => {
         payload.geocode_location_type = geocode.location_type || null;
         payload.geocoded_at = new Date().toISOString();
         payload.manual_location_override = false;
-      } else if (!isManualOverride) {
+      } else {
         payload.lat = fallbackLat;
         payload.lng = fallbackLng;
         payload.geocode_status = "failed";
-        payload.geocode_source = "suburb_default";
+        payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
+        payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
         payload.manual_location_override = false;
       }
     }
