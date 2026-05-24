@@ -588,7 +588,7 @@ useEffect(() => {
     !payload.direction ||
     !payload.toner_code
   ) {
-    setError("Please complete Equipment ID, Customer, Suburb, Direction and Toner Code before saving.");
+    setError("Please complete Equipment ID, Customer, Suburb, Direction and Product Code before saving.");
     return;
   }
 
@@ -1666,7 +1666,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
     </div>
   );
 }
-function ocrDigitsOnly(value = "") {
+function normaliseOcrToken(value = "") {
   return value
     .toUpperCase()
     .replace(/O/g, "0")
@@ -1678,120 +1678,80 @@ function ocrDigitsOnly(value = "") {
     .replace(/S/g, "5")
     .replace(/Z/g, "2")
     .replace(/B/g, "8")
-    .replace(/G/g, "6")
-    .replace(/[^0-9]/g, "");
-}
-
-function normaliseDocketNo(value = "") {
-  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-  if (cleaned.length < 4) return "";
-
-  const prefix = cleaned.slice(0, 2).replace(/0/g, "O").replace(/1/g, "I");
-  const digits = ocrDigitsOnly(cleaned.slice(2));
-
-  if (!/^[A-Z]{2}$/.test(prefix)) return "";
-  if (digits.length < 5) return "";
-
-  return `${prefix}${digits}`;
-}
-
-function normaliseEquipmentNo(value = "") {
-  const digits = ocrDigitsOnly(value);
-  return digits.length >= 4 ? digits : "";
+    .replace(/G/g, "6");
 }
 
 function extractDocketFieldsFromText(text = "") {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const fullText = lines.join("\n");
 
-  function matchOne(patterns) {
-    for (const pattern of patterns) {
-      const match = fullText.match(pattern);
-      if (match?.[1]) return match[1].trim();
+  const docketCandidates = normaliseOcrToken(fullText).match(/\b[A-Z]{2}\d{8}\b/g) || [];
+  const docket_no = docketCandidates[0] || "";
+
+  let equipment_id = "";
+  for (const line of lines) {
+    if (!/equipment|machine|serial/i.test(line)) continue;
+    const digits = normaliseOcrToken(line).replace(/[^0-9]/g, "");
+    const sixDigit = digits.match(/\b\d{6}\b/);
+    if (sixDigit) {
+      equipment_id = sixDigit[0];
+      break;
     }
-    return "";
   }
 
-  const rawDocketNo = matchOne([
-    /docket\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-\s]{6,20})/i,
-    /(?:delivery|dispatch)\s*(?:no|number|#)\s*[:\-]?\s*([A-Z0-9\-\s]{6,20})/i,
-    /\b([A-Z]{2}[A-Z0-9]{5,12})\b/i,
-  ]);
+  const deliverIndex = lines.findIndex((line) => /deliver\s*to/i.test(line));
+  const deliverBlock = deliverIndex >= 0 ? lines.slice(deliverIndex, Math.min(lines.length, deliverIndex + 10)) : [];
 
-  const docket_no = normaliseDocketNo(rawDocketNo);
-
-  const rawEquipmentNo = matchOne([
-    /equipment\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-    /equip(?:ment)?\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-    /machine\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-    /serial\s*(?:id|no|number)?\s*[:\-]?\s*([A-Z0-9\-\s]{4,20})/i,
-  ]);
-
-  const equipment_id = normaliseEquipmentNo(rawEquipmentNo);
-
-  const toner_code = matchOne([
-    /(?:toner|product|item|code)\s*(?:code|no|number)?\s*[:\-]?\s*([A-Z0-9\- ]{3,30})/i,
-    /\b(WT-[A-Z0-9]+)\b/i,
-    /\b(W\d{4,}[A-Z]{0,3})\b/i,
-  ]);
-
-  let customer_name = matchOne([
-    /deliver\s*to\s*[:\-]?\s*(.+)/i,
-    /customer\s*[:\-]?\s*(.+)/i,
-    /client\s*[:\-]?\s*(.+)/i,
-  ]);
-
-  let street_address = matchOne([
-    /address\s*[:\-]?\s*(.+)/i,
-  ]);
-
+  let customer_name = "";
+  let street_address = "";
   let suburb = "";
   let postcode = "";
   let state = "SA";
-  let country = "Australia";
+  const country = "Australia";
 
-  const postcodeLine = lines.find((line) =>
-    /\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+\d{4}\b/i.test(line)
-  );
+  if (deliverBlock.length > 0) {
+    const firstLine = deliverBlock[0].replace(/deliver\s*to\s*[:\-]?\s*/i, "").trim();
+    if (firstLine) customer_name = firstLine;
 
-  if (postcodeLine) {
-    const m = postcodeLine.match(/(.+?)\s+\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+(\d{4})\b/i);
-    if (m) {
-      suburb = m[1].trim();
-      state = m[2].toUpperCase();
-      postcode = m[3];
+    for (let i = 1; i < deliverBlock.length; i += 1) {
+      const line = deliverBlock[i];
+      if (!customer_name && line) {
+        customer_name = line;
+        continue;
+      }
+      if (!street_address && /^\d+\s+[A-Za-z]/.test(line)) {
+        street_address = line;
+        continue;
+      }
+      const m = line.match(/(.+?)\s+\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+(\d{4})\b/i);
+      if (m) {
+        suburb = m[1].trim();
+        state = m[2].toUpperCase();
+        postcode = m[3];
+        break;
+      }
     }
   }
+
   if (!suburb && suburbOptions.length > 0) {
-  const textForSearch = ` ${fullText.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
-
-  const matchedSuburb = suburbOptions.find((item) => {
-    const label = item.label.toLowerCase();
-    return textForSearch.includes(` ${label} `);
-  });
-
-  if (matchedSuburb) {
-    suburb = matchedSuburb.label;
-  }
-}
-  if (!street_address) {
-    const possibleAddress = lines.find((line) =>
-      /^\d+\s+[A-Za-z]/.test(line) &&
-      /(road|rd|street|st|avenue|ave|drive|dr|court|ct|terrace|tce|highway|hwy|lane|ln)/i.test(line)
-    );
-    street_address = possibleAddress || "";
+    const blockText = ` ${deliverBlock.join(" ").toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+    const matchedSuburb = suburbOptions.find((item) => blockText.includes(` ${item.label.toLowerCase()} `));
+    if (matchedSuburb) suburb = matchedSuburb.label;
   }
 
-  if (!customer_name) {
-    const deliverIndex = lines.findIndex((line) => /deliver\s*to/i.test(line));
-    if (deliverIndex >= 0 && lines[deliverIndex + 1]) {
-      customer_name = lines[deliverIndex + 1];
-    }
+  const productIndex = lines.findIndex((line) => /product\s*code/i.test(line));
+  const productSearch = productIndex >= 0 ? lines.slice(productIndex, Math.min(lines.length, productIndex + 8)) : [];
+  const productCodes = [];
+  const seen = new Set();
+  for (const line of productSearch) {
+    const matches = line.toUpperCase().match(/\b[A-Z0-9]{2,}(?:-[A-Z0-9]+)+\b|\bW\d{4,}[A-Z0-9]*\b/g) || [];
+    matches.forEach((code) => {
+      const cleaned = code.trim();
+      if (!seen.has(cleaned)) {
+        seen.add(cleaned);
+        productCodes.push(cleaned);
+      }
+    });
   }
 
   return {
@@ -1803,9 +1763,9 @@ function extractDocketFieldsFromText(text = "") {
     state,
     postcode,
     country,
-    toner_code: toner_code.trim().toUpperCase(),
+    toner_code: productCodes.join(", "),
     priority: "Normal",
-    notes: `OCR text:\n${fullText.slice(0, 1200)}`,
+    notes: "",
   };
 }
 
@@ -1954,14 +1914,14 @@ function HistoryView({ orders, filters, setFilters }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-black text-slate-950">History</h2>
-            <p className="mt-1 text-sm text-slate-500">Search by customer, date, toner/model, docket/equipment, or staff.</p>
+            <p className="mt-1 text-sm text-slate-500">Search by customer, date, product/model, docket/equipment, or staff.</p>
           </div>
           <button onClick={clearFilters} className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900">Clear</button>
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Field label="Customer" value={filters.customer} onChange={(v) => updateFilter("customer", v)} placeholder="Customer name" />
-          <Field label="Model / Toner / Equipment" value={filters.model} onChange={(v) => updateFilter("model", v)} placeholder="WT-202 / 290459 / TG67B" />
+          <Field label="Model / Product / Equipment" value={filters.model} onChange={(v) => updateFilter("model", v)} placeholder="WT-202 / 290459 / TG67B" />
           <Field label="From" type="date" value={filters.from} onChange={(v) => updateFilter("from", v)} />
           <Field label="To" type="date" value={filters.to} onChange={(v) => updateFilter("to", v)} />
           <label className="block sm:col-span-2">
@@ -2094,7 +2054,7 @@ function AddSheet({ form, updateForm, addOrder, close, saving }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Docket No" value={form.docket_no} onChange={(v) => updateForm("docket_no", v)} placeholder="e.g. AN06561284" />
           <Field label="Equipment ID" value={form.equipment_id} onChange={(v) => updateForm("equipment_id", v)} icon={<Search className="h-4 w-4" />} placeholder="Machine / Equipment ID" />
-          <Field label="Toner Code" value={form.toner_code} onChange={(v) => updateForm("toner_code", v)} icon={<Package className="h-4 w-4" />} placeholder="WT-B1 / W9060MC" />
+          <Field label="Product Code" value={form.toner_code} onChange={(v) => updateForm("toner_code", v)} icon={<Package className="h-4 w-4" />} placeholder="WT-B1 / W9060MC" />
           <Field label="Customer" value={form.customer_name} onChange={(v) => updateForm("customer_name", v)} placeholder="Customer name" />
           <Field label="Street address" value={form.street_address || form.address} onChange={(v) => updateForm("street_address", v)} placeholder="Street number and street name" />
           <SuburbSelect label="Suburb" value={form.suburb} onChange={(v) => updateForm("suburb", v)} />
