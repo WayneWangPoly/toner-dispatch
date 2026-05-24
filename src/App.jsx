@@ -1389,10 +1389,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         y: dragRef.current.startCenterPx.y - dy,
       };
       const nextCenter = worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom);
-      setCenter((current) => ({
-        lat: current.lat + (nextCenter.lat - current.lat) * MAP_DRAG_SMOOTHING,
-        lng: current.lng + (nextCenter.lng - current.lng) * MAP_DRAG_SMOOTHING,
-      }));
+      setMapCenterSmooth(nextCenter);
     }
   }
 
