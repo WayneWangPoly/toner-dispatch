@@ -1204,8 +1204,8 @@ function Info({ icon, text }) {
 }
 
 function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
-  const MAP_DRAG_SENSITIVITY = 0.65;
-  const MAP_DRAG_SMOOTHING = 0.65;
+  const MAP_DRAG_SENSITIVITY = 0.8;
+  const MAP_DRAG_EASING = 0.28;
   const [center, setCenter] = useState(ADELAIDE_CENTER);
   const [zoom, setZoom] = useState(MAP_ZOOM);
   const [openMarkerKey, setOpenMarkerKey] = useState(null);
