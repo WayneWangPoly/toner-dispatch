@@ -640,6 +640,10 @@ useEffect(() => {
   const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
   const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
   const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+  const hasAiGeocode =
+    hasUsableLatLng(form) &&
+    form.geocode_source === "google_geocode" &&
+    form.geocode_status === "success";
     
   const payload = {
     docket_no: form.docket_no.trim(),
@@ -662,12 +666,12 @@ useEffect(() => {
     created_at: new Date().toISOString(),
     lat: fallbackLat,
     lng: fallbackLng,
-    geocode_status: isManualOverride ? "success" : "pending",
-    geocode_source: isManualOverride ? "manual_override" : hasSuburbDefault ? "suburb_default" : "none",
-    geocode_formatted_address: null,
-    geocode_place_id: null,
-    geocode_location_type: null,
-    geocoded_at: isManualOverride ? new Date().toISOString() : null,
+    geocode_status: isManualOverride || hasAiGeocode ? "success" : "pending",
+    geocode_source: isManualOverride ? "manual_override" : hasAiGeocode ? "google_geocode" : hasSuburbDefault ? "suburb_default" : "none",
+    geocode_formatted_address: hasAiGeocode ? form.geocode_formatted_address || null : null,
+    geocode_place_id: hasAiGeocode ? form.geocode_place_id || null : null,
+    geocode_location_type: hasAiGeocode ? form.geocode_location_type || null : null,
+    geocoded_at: isManualOverride ? new Date().toISOString() : hasAiGeocode ? form.geocoded_at || new Date().toISOString() : null,
     manual_location_override: isManualOverride,
     notes: form.notes.trim(),
   };
@@ -699,6 +703,8 @@ useEffect(() => {
       payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
       payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
       payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
+    } else if (hasAiGeocode) {
+      // AI Scan already geocoded this address inside the Edge Function.
     } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {
       const geocode = await geocodeAddressWithGoogle(geocodeAddress);
 
@@ -1067,8 +1073,15 @@ if (supabase && !session) {
               toner_code: data.toner_code || "",
               priority: data.priority || "Normal",
               notes: data.notes || "",
-              lat: defaults.lat != null ? String(defaults.lat) : "",
-              lng: defaults.lng != null ? String(defaults.lng) : "",
+              lat: data.lat || (defaults.lat != null ? String(defaults.lat) : ""),
+              lng: data.lng || (defaults.lng != null ? String(defaults.lng) : ""),
+              geocode_status: data.geocode_status || (data.lat && data.lng ? "success" : "pending"),
+              geocode_source: data.geocode_source || (data.lat && data.lng ? "google_geocode" : "suburb_default"),
+              geocode_formatted_address: data.geocode_formatted_address || "",
+              geocode_place_id: data.geocode_place_id || "",
+              geocode_location_type: data.geocode_location_type || (data.lat && data.lng ? "ROOFTOP" : "APPROXIMATE"),
+              geocoded_at: data.geocoded_at || "",
+              manual_location_override: false,
             });
 
             setShowPhotoImport(false);
@@ -1959,6 +1972,15 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
         toner_code: Array.isArray(data?.product_codes) ? data.product_codes.join(", ") : "",
         priority: "Normal",
         notes: "",
+        lat: data?.lat != null ? String(data.lat) : "",
+        lng: data?.lng != null ? String(data.lng) : "",
+        geocode_status: data?.geocode_status || "pending",
+        geocode_source: data?.geocode_source || "none",
+        geocode_formatted_address: data?.geocode_formatted_address || "",
+        geocode_place_id: data?.geocode_place_id || "",
+        geocode_location_type: data?.geocode_location_type || "",
+        geocoded_at: data?.geocoded_at || "",
+        manual_location_override: false,
       };
 
       if (!extracted.equipment_id && !extracted.docket_no && !extracted.toner_code) {
