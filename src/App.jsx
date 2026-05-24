@@ -1332,6 +1332,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function handlePointerDown(event) {
     event.preventDefault();
+    setOpenMarkerKey(null);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     pointersRef.current.set(event.pointerId, pointFromEvent(event));
     const points = Array.from(pointersRef.current.values());
@@ -1601,7 +1602,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
     <div className="absolute z-20" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()}>
       <button
         onPointerDown={stopMapEvent}
-        onClick={(e) => {
+        onPointerUp={(e) => {
           stopMapEvent(e);
           setOpenMarkerKey(open ? null : group.key);
         }}
