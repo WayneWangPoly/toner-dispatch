@@ -257,15 +257,16 @@ function shouldUseCachedLocation(record = {}) {
 }
 
 function navigationUrl(provider, order) {
-  const destination = hasUsableLatLng(order)
-    ? `${Number(order.lat)},${Number(order.lng)}`
-    : navigationQuery(order);
-  const query = encodeURIComponent(destination);
-  if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
+  const query = encodeURIComponent(navigationQuery(order));
+
+  if (provider === "Apple Maps") {
+    return `http://maps.apple.com/?daddr=${query}`;
+  }
+
   if (provider === "Waze") {
-    if (hasCoords) return `https://waze.com/ul?ll=${query}&navigate=yes`;
     return `https://waze.com/ul?q=${query}&navigate=yes`;
   }
+
   return `https://www.google.com/maps/dir/?api=1&destination=${query}`;
 }
 
