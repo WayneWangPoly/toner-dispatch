@@ -434,15 +434,24 @@ useEffect(() => {
   }, [orders, since]);
 
   const areaCounts = useMemo(() => {
-    const counts = {};
-    directionOptions.forEach((d) => {
-      counts[d] = 0;
-    });
-    orders.forEach((o) => {
-      if (o.status === "Waiting") counts[o.direction] = (counts[o.direction] || 0) + 1;
-    });
-    return counts;
-  }, [orders]);
+  const counts = { All: 0 };
+
+  directionOptions.forEach((d) => {
+    counts[d] = 0;
+  });
+
+  orders.forEach((o) => {
+    if (o.status === "Delivered" || o.status === "Courier") return;
+
+    counts.All += 1;
+
+    if (o.direction) {
+      counts[o.direction] = (counts[o.direction] || 0) + 1;
+    }
+  });
+
+  return counts;
+}, [orders]);
 
   const visibleOrders = useMemo(() => {
     return orders
