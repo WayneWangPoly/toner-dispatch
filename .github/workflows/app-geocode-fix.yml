@@ -1,10 +1,6 @@
 name: Patch App geocode save flow
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/app-geocode-fix.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,149 +16,119 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
           import re
+          import textwrap
 
           path = Path('src/App.jsx')
           text = path.read_text()
           original = text
 
           text = text.replace(
-            'import { supabase } from "./lib/supabaseClient";',
-            'import { supabase, SUPABASE_URL } from "./lib/supabaseClient";'
+              'import { supabase } from "./lib/supabaseClient";',
+              'import { supabase, SUPABASE_URL } from "./lib/supabaseClient";'
           )
 
-          old_func = '''async function geocodeAddressWithGoogle(address) {
-  if (!supabase || !address?.trim()) {
-    return {
-      status: "failed",
-      error: "Address is empty before geocoding",
-    };
-  }
+          replacement_func = textwrap.dedent('''
+            async function geocodeAddressWithGoogle(address) {
+              if (!SUPABASE_URL || !address?.trim()) {
+                return {
+                  status: "failed",
+                  error: "Address is empty before geocoding",
+                  address,
+                };
+              }
 
-  const { data, error } = await supabase.functions.invoke("geocode-address", {
-    body: { address: address.trim() },
-  });
+              try {
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ address: address.trim() }),
+                });
 
-  if (error) {
-    return {
-      status: "failed",
-      error: error.message || "Failed to call geocode-address function",
-    };
-  }
+                const data = await response.json().catch(() => null);
 
-  if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
-    return {
-      status: "failed",
-      error: data?.error || "No coordinates returned from geocode-address",
-      google_status: data?.google_status || "",
-      address: data?.address || address,
-    };
-  }
+                if (!response.ok) {
+                  return {
+                    status: "failed",
+                    error: data?.error || `Geocode HTTP ${response.status}`,
+                    google_status: data?.google_status || "",
+                    address: data?.address || address,
+                  };
+                }
 
-  return data;
-}'''
-          new_func = '''async function geocodeAddressWithGoogle(address) {
-    if (!SUPABASE_URL || !address?.trim()) {
-      return {
-        status: "failed",
-        error: "Address is empty before geocoding",
-        address,
-      };
-    }
+                if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
+                  return {
+                    status: "failed",
+                    error: data?.error || "No coordinates returned from geocode-address",
+                    google_status: data?.google_status || "",
+                    address: data?.address || address,
+                  };
+                }
 
-    try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: address.trim() }),
-      });
+                return data;
+              } catch (error) {
+                return {
+                  status: "failed",
+                  error: error?.message || "Failed to call geocode-address function",
+                  address,
+                };
+              }
+            }
+          ''').strip()
 
-      const data = await response.json().catch(() => null);
+          text, func_count = re.subn(
+              r'async function geocodeAddressWithGoogle\(address\) \{[\s\S]*?\n\s*return data;\n\s*\}',
+              replacement_func,
+              text,
+              count=1,
+          )
 
-      if (!response.ok) {
-        return {
-          status: "failed",
-          error: data?.error || `Geocode HTTP ${response.status}`,
-          google_status: data?.google_status || "",
-          address: data?.address || address,
-        };
-      }
+          if func_count != 1:
+              raise SystemExit('Failed to replace geocodeAddressWithGoogle')
 
-      if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
-        return {
-          status: "failed",
-          error: data?.error || "No coordinates returned from geocode-address",
-          google_status: data?.google_status || "",
-          address: data?.address || address,
-        };
-      }
+          replacement_block = textwrap.dedent('''
+                if (geocode?.status === "success" && geocode?.lat != null && geocode?.lng != null) {
+                  payload.lat = Number(geocode.lat);
+                  payload.lng = Number(geocode.lng);
+                  payload.geocode_status = "success";
+                  payload.geocode_source = "google_geocode";
+                  payload.geocode_formatted_address = geocode.formatted_address || null;
+                  payload.geocode_place_id = geocode.place_id || null;
+                  payload.geocode_location_type = geocode.location_type || null;
+                  payload.geocoded_at = new Date().toISOString();
+                  payload.manual_location_override = false;
+                } else {
+                  payload.lat = fallbackLat;
+                  payload.lng = fallbackLng;
+                  payload.geocode_status = "failed";
+                  payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
+                  payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
+                  payload.geocode_formatted_address = null;
+                  payload.geocode_place_id = null;
+                  payload.geocoded_at = null;
+                  payload.manual_location_override = false;
+                  setError(
+                    `Saved with suburb approximate location. Geocode failed: ${geocode?.error || "No coordinates returned"}${
+                      geocode?.google_status ? ` (${geocode.google_status})` : ""
+                    }. Address tried: ${geocode?.address || geocodeAddress}`
+                  );
+                }
+          ''').rstrip()
 
-      return data;
-    } catch (error) {
-      return {
-        status: "failed",
-        error: error?.message || "Failed to call geocode-address function",
-        address,
-      };
-    }
-  }'''
-          if old_func not in text:
-            raise SystemExit('geocodeAddressWithGoogle block not found')
-          text = text.replace(old_func, new_func)
+          old_block_re = re.compile(
+              r'      if \(geocode\?\.status !== "success" \|\| geocode\?\.lat == null \|\| geocode\?\.lng == null\) \{[\s\S]*?      payload\.manual_location_override = false;',
+              re.MULTILINE,
+          )
+          text, block_count = old_block_re.subn(replacement_block, text, count=1)
 
-          old_block = '''      if (geocode?.status !== "success" || geocode?.lat == null || geocode?.lng == null) {
-        setError(
-          `Geocode failed: ${geocode?.error || "No coordinates returned"}${
-            geocode?.google_status ? ` (${geocode.google_status})` : ""
-          }. Address tried: ${geocode?.address || geocodeAddress}`
-        );
-        return;
-      }
+          if block_count != 1:
+              raise SystemExit('Failed to replace geocode decision block')
 
-      payload.lat = Number(geocode.lat);
-      payload.lng = Number(geocode.lng);
-      payload.geocode_status = "success";
-      payload.geocode_source = "google_geocode";
-      payload.geocode_formatted_address = geocode.formatted_address || null;
-      payload.geocode_place_id = geocode.place_id || null;
-      payload.geocode_location_type = geocode.location_type || null;
-      payload.geocoded_at = new Date().toISOString();
-      payload.manual_location_override = false;'''
-          new_block = '''      if (geocode?.status === "success" && geocode?.lat != null && geocode?.lng != null) {
-        payload.lat = Number(geocode.lat);
-        payload.lng = Number(geocode.lng);
-        payload.geocode_status = "success";
-        payload.geocode_source = "google_geocode";
-        payload.geocode_formatted_address = geocode.formatted_address || null;
-        payload.geocode_place_id = geocode.place_id || null;
-        payload.geocode_location_type = geocode.location_type || null;
-        payload.geocoded_at = new Date().toISOString();
-        payload.manual_location_override = false;
-      } else {
-        payload.lat = fallbackLat;
-        payload.lng = fallbackLng;
-        payload.geocode_status = "failed";
-        payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
-        payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
-        payload.geocode_formatted_address = null;
-        payload.geocode_place_id = null;
-        payload.geocoded_at = null;
-        payload.manual_location_override = false;
-        setError(
-          `Saved with suburb approximate location. Geocode failed: ${geocode?.error || "No coordinates returned"}${
-            geocode?.google_status ? ` (${geocode.google_status})` : ""
-          }. Address tried: ${geocode?.address || geocodeAddress}`
-        );
-      }'''
-          if old_block not in text:
-            raise SystemExit('geocode decision block not found')
-          text = text.replace(old_block, new_block)
-
-          wf = Path('.github/workflows/app-geocode-fix.yml')
-          if wf.exists():
-            wf.unlink()
+          workflow_path = Path('.github/workflows/app-geocode-fix.yml')
+          if workflow_path.exists():
+              workflow_path.unlink()
 
           if text == original:
-            raise SystemExit('No App.jsx changes were produced')
+              raise SystemExit('No App.jsx changes were produced')
 
           path.write_text(text)
           PY
@@ -173,4 +139,3 @@ jobs:
           git add src/App.jsx .github/workflows/app-geocode-fix.yml
           git commit -m "Fix AI scanned order geocode save flow"
           git push
-# trigger: 3
