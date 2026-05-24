@@ -1007,7 +1007,7 @@ if (supabase && !session) {
         {error && <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
         {!supabase && <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Demo mode: add Supabase environment variables to save shared data.</div>}
 
-        <section className="mb-3 grid grid-cols-5 gap-2">
+        <section className="mb-3 grid grid-cols-5 gap-1.5 sm:gap-2">
           <Kpi label="Waiting" value={metrics.waiting} hot={metrics.waiting > 0} />
           <Kpi label="Taken" value={metrics.taken} />
           <Kpi label="Internal" value={metrics.internal} />
@@ -1165,9 +1165,9 @@ if (supabase && !session) {
 
 function Kpi({ label, value, hot, danger }) {
   return (
-    <div className={`rounded-3xl border p-3 shadow-sm ${danger ? "border-red-300 bg-red-50" : hot ? "border-red-200 bg-white" : "border-slate-200 bg-white"}`}>
-      <div className={`text-2xl font-black ${danger ? "text-red-600" : "text-slate-950"}`}>{value}</div>
-      <div className="mt-1 truncate text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
+    <div className={`min-w-0 rounded-2xl border px-1.5 py-2 text-center shadow-sm sm:rounded-3xl sm:p-3 ${danger ? "border-red-300 bg-red-50" : hot ? "border-red-200 bg-white" : "border-slate-200 bg-white"}`}>
+      <div className={`text-lg font-black leading-none sm:text-2xl ${danger ? "text-red-600" : "text-slate-950"}`}>{value}</div>
+      <div className="mt-1 truncate text-[8.5px] font-black uppercase tracking-tight text-slate-500 sm:text-[11px] sm:tracking-wide">{label}</div>
     </div>
   );
 }
