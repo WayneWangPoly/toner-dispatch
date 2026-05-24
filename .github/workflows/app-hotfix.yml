@@ -88,3 +88,4 @@ function openNavigation'''
             git commit -m "Fix navigation address and map popup actions"
             git push
           fi
+# trigger: 2
