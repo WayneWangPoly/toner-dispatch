@@ -798,9 +798,69 @@ if (geocode?.status === "success" && geocode?.lat != null && geocode?.lng != nul
     updateOrder(id, { status: "Taken", taken_by: staff, taken_at: new Date().toISOString() });
   }
 
-  function markCourier(id) {
-    updateOrder(id, { status: "Courier", taken_by: "Courier", courier_at: new Date().toISOString() });
+  async function markCourier(order) {
+  const courierAt = new Date().toISOString();
+
+  await updateOrder(order.id, {
+    status: "Courier",
+    taken_by: "Courier",
+    courier_at: courierAt,
+  });
+
+  if (supabase && order.equipment_id && !String(order.id).startsWith("demo-")) {
+    const equipmentPayload = {
+      equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+      customer_name: order.customer_name || "",
+      address: order.address || order.street_address || "",
+      street_address: order.street_address || order.address || "",
+      suburb: order.suburb || "",
+      state: order.state || "SA",
+      postcode: order.postcode || "",
+      country: order.country || "Australia",
+      direction: order.direction || "",
+      lat: order.lat,
+      lng: order.lng,
+      last_delivery: courierAt,
+      updated_at: courierAt,
+      geocode_status: order.geocode_status ?? null,
+      geocode_source: order.geocode_source ?? null,
+      geocode_formatted_address: order.geocode_formatted_address ?? null,
+      geocode_place_id: order.geocode_place_id ?? null,
+      geocode_location_type: order.geocode_location_type ?? null,
+      geocoded_at: order.geocoded_at ?? null,
+      manual_location_override: order.manual_location_override ?? false,
+    };
+
+    await supabase.from("equipment_master").upsert(equipmentPayload);
   }
+
+  setEquipment((prev) => ({
+    ...prev,
+    [(order.equipment_id || "").trim().toUpperCase()]: {
+      ...(prev[(order.equipment_id || "").trim().toUpperCase()] || {}),
+      equipment_id: (order.equipment_id || "").trim().toUpperCase(),
+      customer_name: order.customer_name || "",
+      address: order.address || order.street_address || "",
+      street_address: order.street_address || order.address || "",
+      suburb: order.suburb || "",
+      state: order.state || "SA",
+      postcode: order.postcode || "",
+      country: order.country || "Australia",
+      direction: order.direction || "",
+      lat: order.lat,
+      lng: order.lng,
+      last_delivery: courierAt,
+      updated_at: courierAt,
+      geocode_status: order.geocode_status ?? null,
+      geocode_source: order.geocode_source ?? null,
+      geocode_formatted_address: order.geocode_formatted_address ?? null,
+      geocode_place_id: order.geocode_place_id ?? null,
+      geocode_location_type: order.geocode_location_type ?? null,
+      geocoded_at: order.geocoded_at ?? null,
+      manual_location_override: order.manual_location_override ?? false,
+    },
+  }));
+}
 
   async function resetPeriod() {
     const resetAt = new Date().toISOString();
