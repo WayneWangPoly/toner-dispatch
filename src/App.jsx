@@ -1431,44 +1431,6 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
     }
   }
 
-  function handleTouchStart(event) {
-    event.preventDefault();
-    pointersRef.current.clear();
-    for (let i = 0; i < event.touches.length; i += 1) {
-      const touch = event.touches[i];
-      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-    }
-    const points = Array.from(pointersRef.current.values());
-    if (points.length >= 2) startPinch(points);
-    else if (points.length === 1) startDrag(points[0]);
-  }
-
-  function handleTouchMove(event) {
-    event.preventDefault();
-    pointersRef.current.clear();
-    for (let i = 0; i < event.touches.length; i += 1) {
-      const touch = event.touches[i];
-      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-    }
-    moveMapFromPoints(Array.from(pointersRef.current.values()));
-  }
-
-  function handleTouchEnd(event) {
-    event.preventDefault();
-    pointersRef.current.clear();
-    for (let i = 0; i < event.touches.length; i += 1) {
-      const touch = event.touches[i];
-      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-    }
-    const points = Array.from(pointersRef.current.values());
-    if (points.length >= 2) startPinch(points);
-    else if (points.length === 1) startDrag(points[0]);
-    else {
-      dragRef.current = null;
-      pinchRef.current = null;
-    }
-  }
-
   function handlePointerUp(event) {
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     pointersRef.current.delete(event.pointerId);
