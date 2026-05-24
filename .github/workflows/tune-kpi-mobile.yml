@@ -1,0 +1,49 @@
+name: Tune KPI mobile typography
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch KPI mobile typography
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/App.jsx')
+          text = path.read_text()
+
+          text = text.replace(
+              '<section className="mb-3 grid grid-cols-5 gap-2">',
+              '<section className="mb-3 grid grid-cols-5 gap-1.5 sm:gap-2">'
+          )
+          text = text.replace(
+              '<div className={`rounded-3xl border p-3 shadow-sm ${danger ? "border-red-300 bg-red-50" : hot ? "border-red-200 bg-white" : "border-slate-200 bg-white"}`}>',
+              '<div className={`min-w-0 rounded-2xl border px-1.5 py-2 text-center shadow-sm sm:rounded-3xl sm:p-3 ${danger ? "border-red-300 bg-red-50" : hot ? "border-red-200 bg-white" : "border-slate-200 bg-white"}`}>',
+          )
+          text = text.replace(
+              '<div className={`text-2xl font-black ${danger ? "text-red-600" : "text-slate-950"}`}>{value}</div>',
+              '<div className={`text-lg font-black leading-none sm:text-2xl ${danger ? "text-red-600" : "text-slate-950"}`}>{value}</div>',
+          )
+          text = text.replace(
+              '<div className="mt-1 truncate text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</div>',
+              '<div className="mt-1 truncate text-[8.5px] font-black uppercase tracking-tight text-slate-500 sm:text-[11px] sm:tracking-wide">{label}</div>',
+          )
+
+          wf = Path('.github/workflows/tune-kpi-mobile.yml')
+          if wf.exists():
+              wf.unlink()
+          path.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "kpi-mobile-bot"
+          git config user.email "kpi-mobile-bot@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/tune-kpi-mobile.yml
+          git commit -m "Tune KPI mobile typography"
+          git push
