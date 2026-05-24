@@ -357,13 +357,35 @@ export default function TonerDispatchMVP() {
   }
 
   async function geocodeAddressWithGoogle(address) {
-    if (!supabase || !address?.trim()) return null;
-    const { data, error } = await supabase.functions.invoke("geocode-address", {
-      body: { address: address.trim() },
-    });
-    if (error) return null;
-    return data || null;
+  if (!supabase || !address?.trim()) {
+    return {
+      status: "failed",
+      error: "Address is empty before geocoding",
+    };
   }
+
+  const { data, error } = await supabase.functions.invoke("geocode-address", {
+    body: { address: address.trim() },
+  });
+
+  if (error) {
+    return {
+      status: "failed",
+      error: error.message || "Failed to call geocode-address function",
+    };
+  }
+
+  if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
+    return {
+      status: "failed",
+      error: data?.error || "No coordinates returned from geocode-address",
+      google_status: data?.google_status || "",
+      address: data?.address || address,
+    };
+  }
+
+  return data;
+}
 
   useEffect(() => {
   if (!supabase) {
