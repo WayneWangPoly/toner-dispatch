@@ -644,6 +644,7 @@ useEffect(() => {
     hasUsableLatLng(form) &&
     form.geocode_source === "google_geocode" &&
     form.geocode_status === "success";
+  const skipBrowserGeocode = Boolean(form.geocode_checked_by_ai);
     
   const payload = {
     docket_no: form.docket_no.trim(),
@@ -705,6 +706,14 @@ useEffect(() => {
       payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
     } else if (hasAiGeocode) {
       // AI Scan already geocoded this address inside the Edge Function.
+    } else if (skipBrowserGeocode) {
+      payload.lat = fallbackLat;
+      payload.lng = fallbackLng;
+      payload.geocode_status = "failed";
+      payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
+      payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
+      payload.manual_location_override = false;
+      setError("Saved with suburb approximate location. AI geocode did not return precise coordinates.");
     } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {
       const geocode = await geocodeAddressWithGoogle(geocodeAddress);
 
@@ -1082,6 +1091,7 @@ if (supabase && !session) {
               geocode_location_type: data.geocode_location_type || (data.lat && data.lng ? "ROOFTOP" : "APPROXIMATE"),
               geocoded_at: data.geocoded_at || "",
               manual_location_override: false,
+              geocode_checked_by_ai: Boolean(data.geocode_checked_by_ai),
             });
 
             setShowPhotoImport(false);
@@ -1981,6 +1991,7 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
         geocode_location_type: data?.geocode_location_type || "",
         geocoded_at: data?.geocoded_at || "",
         manual_location_override: false,
+        geocode_checked_by_ai: true,
       };
 
       if (!extracted.equipment_id && !extracted.docket_no && !extracted.toner_code) {
