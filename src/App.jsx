@@ -549,8 +549,8 @@ useEffect(() => {
   const hasSuburbDefault = Number.isFinite(Number(defaults.lat)) && Number.isFinite(Number(defaults.lng));
   const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
   const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
-  const isManualOverride = hasUsableLatLng(form) && (form.lat !== "" || form.lng !== "");
-
+  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+    
   const payload = {
     docket_no: form.docket_no.trim(),
     equipment_id: equipmentKey,
