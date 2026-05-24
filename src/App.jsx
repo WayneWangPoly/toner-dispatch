@@ -1578,8 +1578,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
   const label = group.count > 1 ? String(group.count) : directionLabel(primary.direction);
 
   function stopMapEvent(event) {
-    event.preventDefault();
-    event.stopPropagation();
+  event.stopPropagation();
   }
 
   function stopMapPointer(event) {
