@@ -609,8 +609,8 @@ useEffect(() => {
       payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
       payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
       payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
-    } else if (hasSuburbDefault || isManualOverride) {
-      const geocode = !isManualOverride ? await geocodeAddressWithGoogle(geocodeAddress) : null;
+    } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {
+  const geocode = await geocodeAddressWithGoogle(geocodeAddress);
       if (geocode?.lat != null && geocode?.lng != null) {
         payload.lat = Number(geocode.lat);
         payload.lng = Number(geocode.lng);
