@@ -11,7 +11,7 @@ import {
   UserCheck,
   X,
 } from "lucide-react";
-import { supabase } from "./lib/supabaseClient";
+import { supabase, SUPABASE_URL } from "./lib/supabaseClient";
 import LoginScreen from "./components/LoginScreen";
 
 
@@ -369,34 +369,49 @@ export default function TonerDispatchMVP() {
   }
 
   async function geocodeAddressWithGoogle(address) {
-  if (!supabase || !address?.trim()) {
+  if (!SUPABASE_URL || !address?.trim()) {
     return {
       status: "failed",
       error: "Address is empty before geocoding",
+      address,
     };
   }
 
-  const { data, error } = await supabase.functions.invoke("geocode-address", {
-    body: { address: address.trim() },
-  });
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: address.trim() }),
+    });
 
-  if (error) {
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return {
+        status: "failed",
+        error: data?.error || `Geocode HTTP ${response.status}`,
+        google_status: data?.google_status || "",
+        address: data?.address || address,
+      };
+    }
+
+    if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
+      return {
+        status: "failed",
+        error: data?.error || "No coordinates returned from geocode-address",
+        google_status: data?.google_status || "",
+        address: data?.address || address,
+      };
+    }
+
+    return data;
+  } catch (error) {
     return {
       status: "failed",
-      error: error.message || "Failed to call geocode-address function",
+      error: error?.message || "Failed to call geocode-address function",
+      address,
     };
   }
-
-  if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
-    return {
-      status: "failed",
-      error: data?.error || "No coordinates returned from geocode-address",
-      google_status: data?.google_status || "",
-      address: data?.address || address,
-    };
-  }
-
-  return data;
 }
 
   useEffect(() => {
@@ -655,24 +670,33 @@ useEffect(() => {
     } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {
       const geocode = await geocodeAddressWithGoogle(geocodeAddress);
 
-      if (geocode?.status !== "success" || geocode?.lat == null || geocode?.lng == null) {
-        setError(
-          `Geocode failed: ${geocode?.error || "No coordinates returned"}${
-            geocode?.google_status ? ` (${geocode.google_status})` : ""
-          }. Address tried: ${geocode?.address || geocodeAddress}`
-        );
-        return;
-      }
 
-      payload.lat = Number(geocode.lat);
-      payload.lng = Number(geocode.lng);
-      payload.geocode_status = "success";
-      payload.geocode_source = "google_geocode";
-      payload.geocode_formatted_address = geocode.formatted_address || null;
-      payload.geocode_place_id = geocode.place_id || null;
-      payload.geocode_location_type = geocode.location_type || null;
-      payload.geocoded_at = new Date().toISOString();
-      payload.manual_location_override = false;
+if (geocode?.status === "success" && geocode?.lat != null && geocode?.lng != null) {
+  payload.lat = Number(geocode.lat);
+  payload.lng = Number(geocode.lng);
+  payload.geocode_status = "success";
+  payload.geocode_source = "google_geocode";
+  payload.geocode_formatted_address = geocode.formatted_address || null;
+  payload.geocode_place_id = geocode.place_id || null;
+  payload.geocode_location_type = geocode.location_type || null;
+  payload.geocoded_at = new Date().toISOString();
+  payload.manual_location_override = false;
+} else {
+  payload.lat = fallbackLat;
+  payload.lng = fallbackLng;
+  payload.geocode_status = "failed";
+  payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
+  payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
+  payload.geocode_formatted_address = null;
+  payload.geocode_place_id = null;
+  payload.geocoded_at = null;
+  payload.manual_location_override = false;
+  setError(
+    `Saved with suburb approximate location. Geocode failed: ${geocode?.error || "No coordinates returned"}${
+      geocode?.google_status ? ` (${geocode.google_status})` : ""
+    }. Address tried: ${geocode?.address || geocodeAddress}`
+  );
+}
     }
         
     if (supabase) {
