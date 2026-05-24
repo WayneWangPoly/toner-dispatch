@@ -41,6 +41,86 @@ function extractOutputText(data: any) {
   return "";
 }
 
+function cleanAddressForGoogle(address: string) {
+  return address
+    .replace(/\s+/g, " ")
+    .replace(/,\s*,/g, ",")
+    .replace(/^\s*,|,\s*$/g, "")
+    .trim();
+}
+
+function fullAddressForGeocode(source: Record<string, unknown>) {
+  const street = String(source.street_address || "").trim();
+  const suburb = String(source.suburb || "").trim();
+  const state = String(source.state || "SA").trim() || "SA";
+  const postcode = String(source.postcode || "").trim();
+  const country = String(source.country || "Australia").trim() || "Australia";
+  return cleanAddressForGoogle([street, suburb, state, postcode, country].filter(Boolean).join(", "));
+}
+
+async function geocodeAddress(address: string) {
+  const apiKey = Deno.env.get("GOOGLE_GEOCODING_API_KEY");
+
+  if (!apiKey) {
+    return {
+      status: "failed",
+      error: "GOOGLE_GEOCODING_API_KEY is not set",
+      address,
+    };
+  }
+
+  const cleanedAddress = cleanAddressForGoogle(address);
+
+  if (!cleanedAddress) {
+    return {
+      status: "failed",
+      error: "Address is empty before geocoding",
+      address,
+    };
+  }
+
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("address", cleanedAddress);
+  url.searchParams.set("region", "au");
+  url.searchParams.set("key", apiKey);
+
+  const response = await fetch(url.toString());
+  const payload = await response.json();
+
+  if (!response.ok || payload.status !== "OK" || !payload.results?.length) {
+    return {
+      status: "failed",
+      error: payload.error_message || payload.status || "No geocode results",
+      google_status: payload.status || null,
+      address: cleanedAddress,
+    };
+  }
+
+  const result = payload.results[0];
+  const location = result.geometry?.location || {};
+
+  if (location.lat == null || location.lng == null) {
+    return {
+      status: "failed",
+      error: "Geocode result has no coordinates",
+      google_status: payload.status || null,
+      address: cleanedAddress,
+    };
+  }
+
+  return {
+    status: "success",
+    lat: location.lat,
+    lng: location.lng,
+    formatted_address: result.formatted_address || null,
+    place_id: result.place_id || null,
+    location_type: result.geometry?.location_type || null,
+    partial_match: Boolean(result.partial_match),
+    google_status: payload.status || null,
+    address: cleanedAddress,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -223,7 +303,7 @@ Rules:
       );
     }
 
-    return jsonResponse({
+    const result = {
       docket_no: parsed?.docket_no || "",
       equip_no: parsed?.equip_no || "",
       customer_name: parsed?.customer_name || "",
@@ -238,6 +318,30 @@ Rules:
       confidence:
         typeof parsed?.confidence === "number" ? parsed.confidence : 0,
       warnings: Array.isArray(parsed?.warnings) ? parsed.warnings : [],
+    };
+
+    const geocodeAddressText = fullAddressForGeocode(result);
+    const geocode = result.street_address && result.suburb
+      ? await geocodeAddress(geocodeAddressText)
+      : {
+          status: "failed",
+          error: "Missing street address or suburb for geocoding",
+          address: geocodeAddressText,
+        };
+
+    return jsonResponse({
+      ...result,
+      lat: geocode.status === "success" ? geocode.lat : null,
+      lng: geocode.status === "success" ? geocode.lng : null,
+      geocode_status: geocode.status,
+      geocode_source: geocode.status === "success" ? "google_geocode" : "none",
+      geocode_formatted_address: geocode.status === "success" ? geocode.formatted_address : null,
+      geocode_place_id: geocode.status === "success" ? geocode.place_id : null,
+      geocode_location_type: geocode.status === "success" ? geocode.location_type : null,
+      geocoded_at: geocode.status === "success" ? new Date().toISOString() : null,
+      geocode_error: geocode.status === "success" ? "" : geocode.error,
+      geocode_google_status: geocode.status === "success" ? geocode.google_status : geocode.google_status || "",
+      geocode_address: geocode.address || geocodeAddressText,
     });
   } catch (error) {
     return jsonResponse(
