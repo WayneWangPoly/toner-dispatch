@@ -1835,7 +1835,7 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
           <div>
             <h2 className="text-xl font-black text-slate-950">Scan Docket</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Take a photo of the delivery docket. The scan will extract Docket No, Deliver To, Equipment No, and product code.
+              Take a photo of the delivery docket. The scan will extract Docket No, Deliver To address, Equip No., and Product Code.
             </p>
           </div>
           <button onClick={close} className="rounded-2xl bg-slate-100 p-2 text-slate-700">
@@ -2046,7 +2046,7 @@ function AddSheet({ form, updateForm, addOrder, close, saving }) {
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-black text-slate-950">Add Docket</h2>
-            <p className="mt-1 text-xs text-slate-500">Enter Equipment ID first. Existing equipment will auto-fill customer and location.</p>
+            <p className="mt-1 text-xs text-slate-500">Enter Equip No. first. Existing equipment will auto-fill customer and location.</p>
           </div>
           <button onClick={close} className="rounded-2xl bg-slate-100 p-2 text-slate-700"><X className="h-5 w-5" /></button>
         </div>
