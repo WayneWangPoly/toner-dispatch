@@ -858,7 +858,7 @@ if (supabase && !session) {
         </section>
 
         <section className="mb-4 flex gap-2 overflow-x-auto pb-1">
-          <AreaChip active={area === "All"} onClick={() => setArea("All")} label="All" count={metrics.waiting} />
+          <AreaChip active={area === "All"} onClick={() => setArea("All")} label="All" count={areaCounts.All || 0} />
           {directionOptions.map((d) => (
             <AreaChip key={d} active={area === d} onClick={() => setArea(d)} label={d} count={areaCounts[d] || 0} />
           ))}
