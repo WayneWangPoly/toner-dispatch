@@ -1,0 +1,90 @@
+name: Apply direct App hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/app-hotfix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch src/App.jsx
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('src/App.jsx')
+          text = path.read_text()
+          original = text
+
+          nav_re = re.compile(r'function navigationUrl\(provider, order\) \{.*?\n\}\n\nfunction openNavigation', re.S)
+          nav_new = '''function navigationUrl(provider, order) {
+  const query = encodeURIComponent(navigationQuery(order));
+
+  if (provider === "Apple Maps") {
+    return `http://maps.apple.com/?daddr=${query}`;
+  }
+
+  if (provider === "Waze") {
+    return `https://waze.com/ul?q=${query}&navigate=yes`;
+  }
+
+  return `https://www.google.com/maps/dir/?api=1&destination=${query}`;
+}
+
+function openNavigation'''
+          text, nav_count = nav_re.subn(nav_new, text, count=1)
+          if nav_count != 1:
+            raise SystemExit('navigationUrl replacement failed')
+
+          text = text.replace(
+            '  const isManualOverride = hasUsableLatLng(form) && (form.lat !== "" || form.lng !== "");',
+            '  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);'
+          )
+
+          text = text.replace(
+            '    } else if (hasSuburbDefault || isManualOverride) {\n      const geocode = !isManualOverride ? await geocodeAddressWithGoogle(geocodeAddress) : null;',
+            '    } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {\n      const geocode = await geocodeAddressWithGoogle(geocodeAddress);'
+          )
+
+          text = text.replace(
+            '      } else if (!isManualOverride) {\n        payload.lat = fallbackLat;\n        payload.lng = fallbackLng;\n        payload.geocode_status = "failed";\n        payload.geocode_source = "suburb_default";\n        payload.manual_location_override = false;\n      }',
+            '      } else {\n        payload.lat = fallbackLat;\n        payload.lng = fallbackLng;\n        payload.geocode_status = "failed";\n        payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";\n        payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;\n        payload.manual_location_override = false;\n      }'
+          )
+
+          text = re.sub(
+            r'function stopMapEvent\(event\) \{\n\s*event\.preventDefault\(\);\n\s*event\.stopPropagation\(\);\n\s*\}',
+            'function stopMapEvent(event) {\n    event.stopPropagation();\n  }',
+            text,
+            count=1,
+          )
+
+          wf = Path('.github/workflows/app-hotfix.yml')
+          if wf.exists():
+            wf.unlink()
+
+          if text == original:
+            print('No App.jsx changes needed')
+          else:
+            path.write_text(text)
+            print('Patched App.jsx')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "app-hotfix-bot"
+          git config user.email "app-hotfix-bot@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/app-hotfix.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Fix navigation address and map popup actions"
+            git push
+          fi
