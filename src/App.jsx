@@ -1774,6 +1774,7 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
   const [imageBase64, setImageBase64] = useState("");
   const [mimeType, setMimeType] = useState("image/jpeg");
   const [busy, setBusy] = useState(false);
+  const [busyMode, setBusyMode] = useState("");
   const [scanError, setScanError] = useState("");
   const [preview, setPreview] = useState("");
 
@@ -1791,13 +1792,14 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
     setPreview(`data:${compressed.mimeType};base64,${compressed.base64}`);
   }
 
-  async function recogniseDocket() {
+  async function runLocalOcr() {
   if (!preview) {
     setScanError("Please take or upload a docket photo first.");
     return;
   }
 
   setBusy(true);
+  setBusyMode("local");
   setScanError("");
 
   try {
@@ -1825,8 +1827,62 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
     setScanError(err?.message || "OCR failed. Please try again or use Manual Add.");
   } finally {
     setBusy(false);
+    setBusyMode("");
   }
 }
+
+  async function runAiScan() {
+    if (!imageBase64) {
+      setScanError("Please take or upload a docket photo first.");
+      return;
+    }
+    if (!supabase) {
+      setScanError("AI Scan requires Supabase configuration.");
+      return;
+    }
+
+    setBusy(true);
+    setBusyMode("ai");
+    setScanError("");
+
+    try {
+      const { data, error } = await supabase.functions.invoke("extract-docket-ai", {
+        body: { imageBase64, mimeType },
+      });
+
+      if (error) {
+        setScanError(error.message || "AI scan failed. Please try Local OCR or Manual Add.");
+        return;
+      }
+
+      const extracted = {
+        docket_no: data?.docket_no || "",
+        equipment_id: data?.equip_no || "",
+        customer_name: data?.customer_name || "",
+        street_address: data?.street_address || "",
+        suburb: data?.suburb || "",
+        state: data?.state || "SA",
+        postcode: data?.postcode || "",
+        country: data?.country || "Australia",
+        toner_code: Array.isArray(data?.product_codes) ? data.product_codes.join(", ") : "",
+        priority: "Normal",
+        notes: "",
+      };
+
+      if (!extracted.equipment_id && !extracted.docket_no && !extracted.toner_code) {
+        const warningText = Array.isArray(data?.warnings) ? data.warnings.join(" ") : "";
+        setScanError(warningText || "AI scan completed, but key fields were unclear. Please use Local OCR or Manual Add.");
+        return;
+      }
+
+      onExtracted(extracted);
+    } catch (err) {
+      setScanError(err?.message || "AI scan failed. Please try Local OCR or Manual Add.");
+    } finally {
+      setBusy(false);
+      setBusyMode("");
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-slate-950/50 sm:items-center sm:justify-center">
@@ -1868,19 +1924,26 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
         )}
 
         <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Free OCR will read the docket on this phone. Please check the result before saving.
+          AI Scan is recommended. Local OCR is available as fallback. Please check the result before saving.
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="mt-5 grid grid-cols-3 gap-2">
           <button onClick={openManualEntry} className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black text-slate-900">
             Manual Add
           </button>
           <button
-            onClick={recogniseDocket}
+            onClick={runLocalOcr}
+            disabled={busy || !imageBase64}
+            className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-black text-slate-900 disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            {busy && busyMode === "local" ? "Scanning..." : "Local OCR"}
+          </button>
+          <button
+            onClick={runAiScan}
             disabled={busy || !imageBase64}
             className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400"
           >
-            {busy ? "Scanning..." : "Recognise"}
+            {busy && busyMode === "ai" ? "AI Scanning..." : "AI Scan"}
           </button>
         </div>
       </div>
