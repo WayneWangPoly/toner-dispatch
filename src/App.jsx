@@ -641,27 +641,28 @@ useEffect(() => {
       payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
       payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
     } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {
-  const geocode = await geocodeAddressWithGoogle(geocodeAddress);
-      if (geocode?.lat != null && geocode?.lng != null) {
-        payload.lat = Number(geocode.lat);
-        payload.lng = Number(geocode.lng);
-        payload.geocode_status = "success";
-        payload.geocode_source = "google_geocode";
-        payload.geocode_formatted_address = geocode.formatted_address || null;
-        payload.geocode_place_id = geocode.place_id || null;
-        payload.geocode_location_type = geocode.location_type || null;
-        payload.geocoded_at = new Date().toISOString();
-        payload.manual_location_override = false;
-      } else {
-        payload.lat = fallbackLat;
-        payload.lng = fallbackLng;
-        payload.geocode_status = "failed";
-        payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
-        payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
-        payload.manual_location_override = false;
-      }
-    }
+      const geocode = await geocodeAddressWithGoogle(geocodeAddress);
 
+      if (geocode?.status !== "success" || geocode?.lat == null || geocode?.lng == null) {
+        setError(
+          `Geocode failed: ${geocode?.error || "No coordinates returned"}${
+            geocode?.google_status ? ` (${geocode.google_status})` : ""
+          }. Address tried: ${geocode?.address || geocodeAddress}`
+        );
+        return;
+      }
+
+      payload.lat = Number(geocode.lat);
+      payload.lng = Number(geocode.lng);
+      payload.geocode_status = "success";
+      payload.geocode_source = "google_geocode";
+      payload.geocode_formatted_address = geocode.formatted_address || null;
+      payload.geocode_place_id = geocode.place_id || null;
+      payload.geocode_location_type = geocode.location_type || null;
+      payload.geocoded_at = new Date().toISOString();
+      payload.manual_location_override = false;
+    }
+        
     if (supabase) {
       const { data: authData } = await supabase.auth.getUser();
       const currentUser = authData?.user;
