@@ -368,7 +368,8 @@ export default function TonerDispatchMVP() {
     setStoredPreference("toner_nav_prompt", value ? "hide" : "show");
   }
 
-  async function geocodeAddressWithGoogle(address) {
+
+async function geocodeAddressWithGoogle(address) {
   const cleanAddress = address?.trim() || "";
 
   if (!cleanAddress) {
@@ -443,44 +444,6 @@ export default function TonerDispatchMVP() {
     error: "No geocode request method was available",
     address: cleanAddress,
   };
-};
-  }
-
-  try {
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: address.trim() }),
-    });
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      return {
-        status: "failed",
-        error: data?.error || `Geocode HTTP ${response.status}`,
-        google_status: data?.google_status || "",
-        address: data?.address || address,
-      };
-    }
-
-    if (data?.status !== "success" || data?.lat == null || data?.lng == null) {
-      return {
-        status: "failed",
-        error: data?.error || "No coordinates returned from geocode-address",
-        google_status: data?.google_status || "",
-        address: data?.address || address,
-      };
-    }
-
-    return data;
-  } catch (error) {
-    return {
-      status: "failed",
-      error: error?.message || "Failed to call geocode-address function",
-      address,
-    };
-  }
 }
 
   useEffect(() => {
