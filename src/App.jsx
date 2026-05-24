@@ -253,7 +253,19 @@ function hasUsableLatLng(source = {}) {
 }
 
 function shouldUseCachedLocation(record = {}) {
-  return ["google_geocode", "manual_override"].includes(record.geocode_source) && hasUsableLatLng(record);
+  if (!hasUsableLatLng(record)) return false;
+
+  if (record.geocode_source === "manual_override") {
+    return Boolean(record.manual_location_override);
+  }
+
+  if (record.geocode_source === "google_geocode") {
+    return ["ROOFTOP", "RANGE_INTERPOLATED", "GEOMETRIC_CENTER"].includes(
+      record.geocode_location_type
+    );
+  }
+
+  return false;
 }
 
 function navigationUrl(provider, order) {
