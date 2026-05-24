@@ -1,0 +1,133 @@
+name: Use AI geocode fields
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch App.jsx AI geocode mapping
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          app = Path('src/App.jsx')
+          text = app.read_text()
+
+          # 1. Map AI Scan geocode fields into extracted object.
+          old_extracted = '''      const extracted = {
+        docket_no: data?.docket_no || "",
+        equipment_id: data?.equip_no || "",
+        customer_name: data?.customer_name || "",
+        street_address: data?.street_address || "",
+        suburb: data?.suburb || "",
+        state: data?.state || "SA",
+        postcode: data?.postcode || "",
+        country: data?.country || "Australia",
+        toner_code: Array.isArray(data?.product_codes) ? data.product_codes.join(", ") : "",
+        priority: "Normal",
+        notes: "",
+      };'''
+          new_extracted = '''      const extracted = {
+        docket_no: data?.docket_no || "",
+        equipment_id: data?.equip_no || "",
+        customer_name: data?.customer_name || "",
+        street_address: data?.street_address || "",
+        suburb: data?.suburb || "",
+        state: data?.state || "SA",
+        postcode: data?.postcode || "",
+        country: data?.country || "Australia",
+        toner_code: Array.isArray(data?.product_codes) ? data.product_codes.join(", ") : "",
+        priority: "Normal",
+        notes: "",
+        lat: data?.lat != null ? String(data.lat) : "",
+        lng: data?.lng != null ? String(data.lng) : "",
+        geocode_status: data?.geocode_status || "pending",
+        geocode_source: data?.geocode_source || "none",
+        geocode_formatted_address: data?.geocode_formatted_address || "",
+        geocode_place_id: data?.geocode_place_id || "",
+        geocode_location_type: data?.geocode_location_type || "",
+        geocoded_at: data?.geocoded_at || "",
+        manual_location_override: false,
+      };'''
+          if old_extracted not in text:
+            raise SystemExit('AI extracted object block not found')
+          text = text.replace(old_extracted, new_extracted)
+
+          # 2. When applying extracted data to form, prefer AI geocoded lat/lng over suburb default.
+          old_form_tail = '''              priority: data.priority || "Normal",
+              notes: data.notes || "",
+              lat: defaults.lat != null ? String(defaults.lat) : "",
+              lng: defaults.lng != null ? String(defaults.lng) : "",
+            });'''
+          new_form_tail = '''              priority: data.priority || "Normal",
+              notes: data.notes || "",
+              lat: data.lat || (defaults.lat != null ? String(defaults.lat) : ""),
+              lng: data.lng || (defaults.lng != null ? String(defaults.lng) : ""),
+              geocode_status: data.geocode_status || (data.lat && data.lng ? "success" : "pending"),
+              geocode_source: data.geocode_source || (data.lat && data.lng ? "google_geocode" : "suburb_default"),
+              geocode_formatted_address: data.geocode_formatted_address || "",
+              geocode_place_id: data.geocode_place_id || "",
+              geocode_location_type: data.geocode_location_type || (data.lat && data.lng ? "ROOFTOP" : "APPROXIMATE"),
+              geocoded_at: data.geocoded_at || "",
+              manual_location_override: false,
+            });'''
+          if old_form_tail not in text:
+            raise SystemExit('onExtracted form tail block not found')
+          text = text.replace(old_form_tail, new_form_tail)
+
+          # 3. In addOrder, if AI already provided google geocode, do not call browser geocode again.
+          old_is_manual = '  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);'
+          new_is_manual = '''  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+  const hasAiGeocode =
+    hasUsableLatLng(form) &&
+    form.geocode_source === "google_geocode" &&
+    form.geocode_status === "success";'''
+          if old_is_manual not in text:
+            raise SystemExit('isManualOverride line not found')
+          text = text.replace(old_is_manual, new_is_manual, 1)
+
+          old_payload_geo = '''    geocode_status: isManualOverride ? "success" : "pending",
+    geocode_source: isManualOverride ? "manual_override" : hasSuburbDefault ? "suburb_default" : "none",
+    geocode_formatted_address: null,
+    geocode_place_id: null,
+    geocode_location_type: null,
+    geocoded_at: isManualOverride ? new Date().toISOString() : null,
+    manual_location_override: isManualOverride,'''
+          new_payload_geo = '''    geocode_status: isManualOverride || hasAiGeocode ? "success" : "pending",
+    geocode_source: isManualOverride ? "manual_override" : hasAiGeocode ? "google_geocode" : hasSuburbDefault ? "suburb_default" : "none",
+    geocode_formatted_address: hasAiGeocode ? form.geocode_formatted_address || null : null,
+    geocode_place_id: hasAiGeocode ? form.geocode_place_id || null : null,
+    geocode_location_type: hasAiGeocode ? form.geocode_location_type || null : null,
+    geocoded_at: isManualOverride ? new Date().toISOString() : hasAiGeocode ? form.geocoded_at || new Date().toISOString() : null,
+    manual_location_override: isManualOverride,'''
+          if old_payload_geo not in text:
+            raise SystemExit('payload geocode block not found')
+          text = text.replace(old_payload_geo, new_payload_geo, 1)
+
+          old_geocode_branch = '    } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {'
+          new_geocode_branch = '    } else if (hasAiGeocode) {\n      // AI Scan already geocoded this address inside the Edge Function.\n    } else if (supabase && !isManualOverride && payload.street_address && payload.suburb) {'
+          if old_geocode_branch not in text:
+            raise SystemExit('geocode branch not found')
+          text = text.replace(old_geocode_branch, new_geocode_branch, 1)
+
+          wf = Path('.github/workflows/use-ai-geocode-fields.yml')
+          if wf.exists():
+            wf.unlink()
+
+          app.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "ai-geocode-fields-bot"
+          git config user.email "ai-geocode-fields-bot@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/use-ai-geocode-fields.yml
+          git commit -m "Use AI geocoded coordinates when saving scanned orders"
+          git push
