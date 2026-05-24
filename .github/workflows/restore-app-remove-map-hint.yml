@@ -1,0 +1,35 @@
+name: Restore App and remove map hint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Restore App.jsx from previous commit and remove map hint
+        run: |
+          git checkout HEAD~1 -- src/App.jsx
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/App.jsx')
+          text = path.read_text()
+          text = text.replace('            <p className="mt-1 text-xs text-slate-500">One finger to move. Two fingers to zoom. Same address is grouped with a number.</p>\n', '')
+          wf = Path('.github/workflows/restore-app-remove-map-hint.yml')
+          if wf.exists():
+              wf.unlink()
+          path.write_text(text)
+          PY
+      - name: Commit restore
+        run: |
+          git config user.name "restore-app-bot"
+          git config user.email "restore-app-bot@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/restore-app-remove-map-hint.yml
+          git commit -m "Restore App and remove map hint"
+          git push
