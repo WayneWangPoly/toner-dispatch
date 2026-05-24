@@ -21,6 +21,14 @@ function errorMessage(error: unknown) {
   return String(error);
 }
 
+function cleanAddressForGoogle(address: string) {
+  return address
+    .replace(/\s+/g, " ")
+    .replace(/,\s*,/g, ",")
+    .replace(/^\s*,|,\s*$/g, "")
+    .trim();
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -58,10 +66,11 @@ serve(async (req) => {
       );
     }
 
+    const cleanedAddress = cleanAddressForGoogle(address);
+
     const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-    url.searchParams.set("address", address.trim());
+    url.searchParams.set("address", cleanedAddress);
     url.searchParams.set("region", "au");
-    url.searchParams.set("components", "country:AU");
     url.searchParams.set("key", apiKey);
 
     const response = await fetch(url.toString());
@@ -71,7 +80,8 @@ serve(async (req) => {
       return jsonResponse({
         status: "failed",
         error: payload.error_message || payload.status || "No geocode results",
-        address,
+        google_status: payload.status || null,
+        address: cleanedAddress,
       });
     }
 
@@ -82,7 +92,8 @@ serve(async (req) => {
       return jsonResponse({
         status: "failed",
         error: "Geocode result has no coordinates",
-        address,
+        google_status: payload.status || null,
+        address: cleanedAddress,
       });
     }
 
@@ -94,7 +105,9 @@ serve(async (req) => {
       place_id: result.place_id || null,
       location_type: result.geometry?.location_type || null,
       partial_match: Boolean(result.partial_match),
-      address,
+      types: result.types || [],
+      google_status: payload.status || null,
+      address: cleanedAddress,
     });
   } catch (error) {
     return jsonResponse(
