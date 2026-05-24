@@ -1340,7 +1340,7 @@ function OrderCard({ order, mapProvider, suppressNavigationPrompt, onTake, onDel
                 Take
               </button>
               <button
-                onClick={() => onCourier(order.id)}
+                onClick={() => onCourier(order)}
                 className="rounded-2xl bg-slate-950 px-2 py-3 text-xs font-black text-white active:scale-[.98]"
               >
                 Courier
