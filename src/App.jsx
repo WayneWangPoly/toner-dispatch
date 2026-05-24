@@ -256,16 +256,10 @@ function shouldUseCachedLocation(record = {}) {
   return ["google_geocode", "manual_override"].includes(record.geocode_source) && hasUsableLatLng(record);
 }
 
-function hasPreciseNavigationLocation(order = {}) {
-  return hasUsableLatLng(order) && (
-    order.geocode_source === "google_geocode" ||
-    order.geocode_source === "manual_override"
-  );
-}
-
 function navigationUrl(provider, order) {
-  const hasCoords = hasPreciseNavigationLocation(order);
-  const destination = hasCoords ? `${Number(order.lat)},${Number(order.lng)}` : navigationQuery(order);
+  const destination = hasUsableLatLng(order)
+    ? `${Number(order.lat)},${Number(order.lng)}`
+    : navigationQuery(order);
   const query = encodeURIComponent(destination);
   if (provider === "Apple Maps") return `http://maps.apple.com/?daddr=${query}`;
   if (provider === "Waze") {
@@ -413,9 +407,7 @@ useEffect(() => {
       const master = {};
       (equipmentResult.data || []).forEach((row) => {
         if (!row.last_delivery) return;
-        const key = (row.equipment_id || "").trim().toUpperCase();
-        if (!key) return;
-        master[key] = row;
+        master[row.equipment_id] = row;
       });
       setEquipment(master);
     }
@@ -553,9 +545,10 @@ useEffect(() => {
 
   const equipmentKey = form.equipment_id.trim().toUpperCase();
   const cachedEquipment = equipment[equipmentKey] || null;
+  const hasSuburbDefault = Number.isFinite(Number(defaults.lat)) && Number.isFinite(Number(defaults.lng));
   const fallbackLat = toNumber(form.lat || defaults.lat, ADELAIDE_CENTER.lat);
   const fallbackLng = toNumber(form.lng || defaults.lng, ADELAIDE_CENTER.lng);
-  const isManualOverride = Boolean(form.manual_location_override) && hasUsableLatLng(form);
+  const isManualOverride = hasUsableLatLng(form) && (form.lat !== "" || form.lng !== "");
 
   const payload = {
     docket_no: form.docket_no.trim(),
@@ -578,12 +571,12 @@ useEffect(() => {
     created_at: new Date().toISOString(),
     lat: fallbackLat,
     lng: fallbackLng,
-    geocode_status: form.geocode_status || (isManualOverride ? "success" : "pending"),
-    geocode_source: form.geocode_source || (isManualOverride ? "manual_override" : "none"),
-    geocode_formatted_address: form.geocode_formatted_address || null,
-    geocode_place_id: form.geocode_place_id || null,
-    geocode_location_type: form.geocode_location_type || null,
-    geocoded_at: form.geocoded_at || (isManualOverride ? new Date().toISOString() : null),
+    geocode_status: isManualOverride ? "success" : "pending",
+    geocode_source: isManualOverride ? "manual_override" : hasSuburbDefault ? "suburb_default" : "none",
+    geocode_formatted_address: null,
+    geocode_place_id: null,
+    geocode_location_type: null,
+    geocoded_at: isManualOverride ? new Date().toISOString() : null,
     manual_location_override: isManualOverride,
     notes: form.notes.trim(),
   };
@@ -595,7 +588,7 @@ useEffect(() => {
     !payload.direction ||
     !payload.toner_code
   ) {
-    setError("Please complete Equip No., Customer, Suburb, Direction and Product Code before saving.");
+    setError("Please complete Equipment ID, Customer, Suburb, Direction and Product Code before saving.");
     return;
   }
 
@@ -615,10 +608,8 @@ useEffect(() => {
       payload.geocode_location_type = cachedEquipment.geocode_location_type || null;
       payload.geocoded_at = cachedEquipment.geocoded_at || new Date().toISOString();
       payload.manual_location_override = cachedEquipment.geocode_source === "manual_override";
-    } else {
-      const hasSuburbDefault = Number.isFinite(Number(defaults.lat)) && Number.isFinite(Number(defaults.lng));
-      const canGeocode = Boolean(supabase) && !isManualOverride && Boolean(payload.street_address?.trim()) && Boolean(payload.suburb?.trim());
-      const geocode = canGeocode ? await geocodeAddressWithGoogle(geocodeAddress) : null;
+    } else if (hasSuburbDefault || isManualOverride) {
+      const geocode = !isManualOverride ? await geocodeAddressWithGoogle(geocodeAddress) : null;
       if (geocode?.lat != null && geocode?.lng != null) {
         payload.lat = Number(geocode.lat);
         payload.lng = Number(geocode.lng);
@@ -629,12 +620,11 @@ useEffect(() => {
         payload.geocode_location_type = geocode.location_type || null;
         payload.geocoded_at = new Date().toISOString();
         payload.manual_location_override = false;
-      } else if (canGeocode) {
+      } else if (!isManualOverride) {
         payload.lat = fallbackLat;
         payload.lng = fallbackLng;
         payload.geocode_status = "failed";
-        payload.geocode_source = hasSuburbDefault ? "suburb_default" : "none";
-        payload.geocode_location_type = hasSuburbDefault ? "APPROXIMATE" : null;
+        payload.geocode_source = "suburb_default";
         payload.manual_location_override = false;
       }
     }
@@ -730,13 +720,7 @@ useEffect(() => {
         geocoded_at: order.geocoded_at ?? null,
         manual_location_override: order.manual_location_override ?? false,
       };
-      const equipmentResult = await supabase
-        .from("equipment_master")
-        .upsert(equipmentPayload, { onConflict: "equipment_id" });
-      if (equipmentResult.error) {
-        setError(equipmentResult.error.message);
-        return;
-      }
+      await supabase.from("equipment_master").upsert(equipmentPayload);
     }
 
     setEquipment((prev) => ({
@@ -1209,8 +1193,8 @@ function Info({ icon, text }) {
 }
 
 function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, onDeliver, onCourier }) {
-  const MAP_DRAG_SENSITIVITY = 0.55;
-  const MAP_DRAG_EASING = 0.22;
+  const MAP_DRAG_SENSITIVITY = 0.35;
+  const MAP_DRAG_SMOOTHING = 0.65;
   const [center, setCenter] = useState(ADELAIDE_CENTER);
   const [zoom, setZoom] = useState(MAP_ZOOM);
   const [openMarkerKey, setOpenMarkerKey] = useState(null);
@@ -1393,7 +1377,48 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         y: dragRef.current.startCenterPx.y - dy,
       };
       const nextCenter = worldPixelsToLatLng(nextPx.x, nextPx.y, dragRef.current.zoom);
-      setMapCenterSmooth(nextCenter);
+      setCenter((current) => ({
+        lat: current.lat + (nextCenter.lat - current.lat) * MAP_DRAG_SMOOTHING,
+        lng: current.lng + (nextCenter.lng - current.lng) * MAP_DRAG_SMOOTHING,
+      }));
+    }
+  }
+
+  function handleTouchStart(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+  }
+
+  function handleTouchMove(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    moveMapFromPoints(Array.from(pointersRef.current.values()));
+  }
+
+  function handleTouchEnd(event) {
+    event.preventDefault();
+    pointersRef.current.clear();
+    for (let i = 0; i < event.touches.length; i += 1) {
+      const touch = event.touches[i];
+      pointersRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2) startPinch(points);
+    else if (points.length === 1) startDrag(points[0]);
+    else {
+      dragRef.current = null;
+      pinchRef.current = null;
     }
   }
 
@@ -1656,57 +1681,6 @@ function normaliseOcrToken(value = "") {
     .replace(/G/g, "6");
 }
 
-function extractEquipNo(lines = []) {
-  const labelRegex = /equip\s*(?:no|number|#)?\.?/i;
-  const removeLabelRegex = /.*?equip\s*(?:no|number|#)?\.?\s*[:\-]?\s*/i;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!labelRegex.test(line)) continue;
-
-    const candidates = [line.replace(removeLabelRegex, "").trim(), (lines[i + 1] || "").trim()];
-    for (const candidate of candidates) {
-      const normalized = normaliseOcrToken(candidate).replace(/[^0-9]/g, "");
-      const match = normalized.match(/\b\d{6}\b/);
-      if (match) return match[0];
-    }
-  }
-  return "";
-}
-
-function isLikelyStreetLine(line = "") {
-  const streetType = /\b(road|rd|street|st|avenue|ave|drive|dr|court|ct|terrace|tce|highway|hwy|lane|ln|parade|pde|place|pl|crescent|cres|way|circuit|cct)\b/i;
-  return streetType.test(line);
-}
-
-function extractStreetAddressFromDeliverBlock(deliverBlock = []) {
-  for (let i = 0; i < deliverBlock.length; i += 1) {
-    const line = deliverBlock[i];
-    if (!isLikelyStreetLine(line)) continue;
-
-    const numberIndex = line.search(/\b\d+[A-Z]?(?:-\d+[A-Z]?)?\b/i);
-    if (numberIndex > 0) {
-      return line.slice(numberIndex).trim();
-    }
-    if (numberIndex === 0) {
-      return line.trim();
-    }
-
-    const prev = (deliverBlock[i - 1] || "").trim();
-    if (/^\d+[A-Z]?(?:-\d+[A-Z]?)?$/.test(prev)) {
-      return `${prev} ${line}`.trim();
-    }
-
-    const next = (deliverBlock[i + 1] || "").trim();
-    const joined = `${line} ${next}`.trim();
-    const joinedNumIndex = joined.search(/\b\d+[A-Z]?(?:-\d+[A-Z]?)?\b/i);
-    if (joinedNumIndex >= 0 && isLikelyStreetLine(joined)) {
-      return joined.slice(joinedNumIndex).trim();
-    }
-  }
-  return "";
-}
-
 function extractDocketFieldsFromText(text = "") {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const fullText = lines.join("\n");
@@ -1714,7 +1688,16 @@ function extractDocketFieldsFromText(text = "") {
   const docketCandidates = normaliseOcrToken(fullText).match(/\b[A-Z]{2}\d{8}\b/g) || [];
   const docket_no = docketCandidates[0] || "";
 
-  const equipment_id = extractEquipNo(lines);
+  let equipment_id = "";
+  for (const line of lines) {
+    if (!/equipment|machine|serial/i.test(line)) continue;
+    const digits = normaliseOcrToken(line).replace(/[^0-9]/g, "");
+    const sixDigit = digits.match(/\b\d{6}\b/);
+    if (sixDigit) {
+      equipment_id = sixDigit[0];
+      break;
+    }
+  }
 
   const deliverIndex = lines.findIndex((line) => /deliver\s*to/i.test(line));
   const deliverBlock = deliverIndex >= 0 ? lines.slice(deliverIndex, Math.min(lines.length, deliverIndex + 10)) : [];
@@ -1736,6 +1719,10 @@ function extractDocketFieldsFromText(text = "") {
         customer_name = line;
         continue;
       }
+      if (!street_address && /^\d+\s+[A-Za-z]/.test(line)) {
+        street_address = line;
+        continue;
+      }
       const m = line.match(/(.+?)\s+\b(SA|VIC|NSW|QLD|WA|TAS|ACT|NT)\b\s+(\d{4})\b/i);
       if (m) {
         suburb = m[1].trim();
@@ -1751,8 +1738,6 @@ function extractDocketFieldsFromText(text = "") {
     const matchedSuburb = suburbOptions.find((item) => blockText.includes(` ${item.label.toLowerCase()} `));
     if (matchedSuburb) suburb = matchedSuburb.label;
   }
-
-  street_address = extractStreetAddressFromDeliverBlock(deliverBlock);
 
   const productIndex = lines.findIndex((line) => /product\s*code/i.test(line));
   const productSearch = productIndex >= 0 ? lines.slice(productIndex, Math.min(lines.length, productIndex + 8)) : [];
@@ -2131,7 +2116,7 @@ function AddSheet({ form, updateForm, addOrder, close, saving }) {
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Docket No" value={form.docket_no} onChange={(v) => updateForm("docket_no", v)} placeholder="e.g. AN06561284" />
-          <Field label="Equip No." value={form.equipment_id} onChange={(v) => updateForm("equipment_id", v)} icon={<Search className="h-4 w-4" />} placeholder="6-digit Equip No." />
+          <Field label="Equipment ID" value={form.equipment_id} onChange={(v) => updateForm("equipment_id", v)} icon={<Search className="h-4 w-4" />} placeholder="Machine / Equipment ID" />
           <Field label="Product Code" value={form.toner_code} onChange={(v) => updateForm("toner_code", v)} icon={<Package className="h-4 w-4" />} placeholder="WT-B1 / W9060MC" />
           <Field label="Customer" value={form.customer_name} onChange={(v) => updateForm("customer_name", v)} placeholder="Customer name" />
           <Field label="Street address" value={form.street_address || form.address} onChange={(v) => updateForm("street_address", v)} placeholder="Street number and street name" />
