@@ -1,0 +1,135 @@
+name: Patch geocode call fallback
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/geocode-call-fallback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch geocode caller
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          app = Path('src/App.jsx')
+          text = app.read_text()
+          original = text
+
+          # Keep SUPABASE_URL import if present; add it if needed.
+          text = text.replace(
+              'import { supabase } from "./lib/supabaseClient";',
+              'import { supabase, SUPABASE_URL } from "./lib/supabaseClient";'
+          )
+
+          new_func = textwrap.dedent('''
+            async function geocodeAddressWithGoogle(address) {
+              const cleanAddress = address?.trim() || "";
+
+              if (!cleanAddress) {
+                return {
+                  status: "failed",
+                  error: "Address is empty before geocoding",
+                  address,
+                };
+              }
+
+              const body = { address: cleanAddress };
+              let lastFailure = null;
+
+              if (supabase) {
+                try {
+                  const { data, error } = await supabase.functions.invoke("geocode-address", {
+                    body,
+                  });
+
+                  if (!error && data?.status === "success" && data?.lat != null && data?.lng != null) {
+                    return data;
+                  }
+
+                  lastFailure = {
+                    status: "failed",
+                    error: error?.message || data?.error || "geocode-address returned no coordinates",
+                    google_status: data?.google_status || "",
+                    address: data?.address || cleanAddress,
+                  };
+                } catch (error) {
+                  lastFailure = {
+                    status: "failed",
+                    error: error?.message || "Supabase function invoke failed",
+                    address: cleanAddress,
+                  };
+                }
+              }
+
+              if (SUPABASE_URL) {
+                try {
+                  const response = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "text/plain;charset=UTF-8",
+                    },
+                    body: JSON.stringify(body),
+                  });
+
+                  const data = await response.json().catch(() => null);
+
+                  if (response.ok && data?.status === "success" && data?.lat != null && data?.lng != null) {
+                    return data;
+                  }
+
+                  lastFailure = {
+                    status: "failed",
+                    error: data?.error || `Geocode HTTP ${response.status}`,
+                    google_status: data?.google_status || "",
+                    address: data?.address || cleanAddress,
+                  };
+                } catch (error) {
+                  lastFailure = {
+                    status: "failed",
+                    error: error?.message || "Direct geocode fetch failed",
+                    address: cleanAddress,
+                  };
+                }
+              }
+
+              return lastFailure || {
+                status: "failed",
+                error: "No geocode request method was available",
+                address: cleanAddress,
+              };
+            }
+          ''').strip()
+
+          pattern = r'async function geocodeAddressWithGoogle\(address\) \{[\s\S]*?\n\s*\}'
+          text, count = re.subn(pattern, new_func, text, count=1)
+
+          if count != 1:
+            raise SystemExit('Failed to replace geocodeAddressWithGoogle')
+
+          wf = Path('.github/workflows/geocode-call-fallback.yml')
+          if wf.exists():
+            wf.unlink()
+
+          if text == original:
+            raise SystemExit('No changes produced')
+
+          app.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "geocode-fallback-bot"
+          git config user.email "geocode-fallback-bot@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/geocode-call-fallback.yml
+          git commit -m "Add robust geocode call fallback"
+          git push
