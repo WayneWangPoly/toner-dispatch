@@ -1515,12 +1515,41 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" }}
       >
         <div className="absolute left-3 top-3 z-30 grid gap-2">
-          <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomIn} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">+</button>
-          <button onPointerDown={(e) => e.stopPropagation()} onClick={zoomOut} className="h-10 w-10 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md">−</button>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              zoomIn();
+            }}
+            className="h-11 w-11 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md active:scale-95"
+          >
+            +
+          </button>
+
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            zoomOut();
+            }}
+            className="h-11 w-11 rounded-2xl bg-white text-xl font-black text-slate-950 shadow-md active:scale-95"
+          >    
+            −
+          </button>
         </div>
 
         <div
-          className="absolute left-0 top-0"
+          className="absolute left-1/2 top-1/2"
           style={{
             width: map.size,
             height: map.size,
@@ -1528,6 +1557,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
             willChange: "transform",
           }}
         >
+        
           {map.tiles.map((tile) => (
             <img
               key={`${zoom}-${tile.x}-${tile.y}`}
