@@ -1,0 +1,89 @@
+name: Fix KPI period persistence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch KPI since logic
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.jsx')
+          text = path.read_text()
+
+          marker = '''function daysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+'''
+          insert = '''function daysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+function startOfTodayIso() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+'''
+          if 'function startOfTodayIso()' not in text:
+              if marker not in text:
+                  raise SystemExit('daysAgo block not found')
+              text = text.replace(marker, insert, 1)
+
+          old = '  const [since, setSince] = useState(() => new Date().toISOString());'
+          new = '  const [since, setSince] = useState(() => startOfTodayIso());'
+          if old in text:
+              text = text.replace(old, new, 1)
+
+          old_load = '''    const ordersResult = await supabase.from("dispatch_orders").select("*").order("created_at", { ascending: true });
+    const equipmentResult = await supabase.from("equipment_master").select("*");
+
+    if (ordersResult.error) setError(ordersResult.error.message);
+    if (!ordersResult.error) setOrders(ordersResult.data || []);
+'''
+          new_load = '''    const ordersResult = await supabase.from("dispatch_orders").select("*").order("created_at", { ascending: true });
+    const equipmentResult = await supabase.from("equipment_master").select("*");
+    const resetResult = await supabase
+      .from("dispatch_resets")
+      .select("reset_at")
+      .order("reset_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (ordersResult.error) setError(ordersResult.error.message);
+    if (!ordersResult.error) setOrders(ordersResult.data || []);
+    if (!resetResult.error && resetResult.data?.reset_at) {
+      setSince(resetResult.data.reset_at);
+    } else {
+      setSince(startOfTodayIso());
+    }
+'''
+          if old_load not in text:
+              raise SystemExit('loadData query block not found')
+          text = text.replace(old_load, new_load, 1)
+
+          wf = Path('.github/workflows/fix-kpi-since.yml')
+          if wf.exists():
+              wf.unlink()
+
+          path.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "kpi-since-bot"
+          git config user.email "kpi-since-bot@users.noreply.github.com"
+          git add src/App.jsx .github/workflows/fix-kpi-since.yml
+          git commit -m "Fix KPI period persistence"
+          git push
