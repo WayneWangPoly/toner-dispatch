@@ -63,6 +63,12 @@ function daysAgo(days) {
   return d.toISOString();
 }
 
+function startOfTodayIso() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
 const demoOrders = [
   {
     id: "demo-1001",
@@ -335,6 +341,7 @@ export default function TonerDispatchMVP() {
 
   const [orders, setOrders] = useState(demoOrders);
   const [equipment, setEquipment] = useState({});
+  const [returnedConsumables, setReturnedConsumables] = useState([]);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [tab, setTab] = useState("Map");
   const [historyFilters, setHistoryFilters] = useState({
@@ -350,7 +357,8 @@ export default function TonerDispatchMVP() {
   });
   const [showAdd, setShowAdd] = useState(false);
   const [showPhotoImport, setShowPhotoImport] = useState(false);
-  const [since, setSince] = useState(() => new Date().toISOString());
+  const [showReturnForm, setShowReturnForm] = useState(false);
+  const [since, setSince] = useState(() => startOfTodayIso());
   const [error, setError] = useState("");
   const [form, setForm] = useState(emptyForm());
   const [savingOrder, setSavingOrder] = useState(false);
@@ -481,9 +489,26 @@ useEffect(() => {
     setError("");
     const ordersResult = await supabase.from("dispatch_orders").select("*").order("created_at", { ascending: true });
     const equipmentResult = await supabase.from("equipment_master").select("*");
+    const resetResult = await supabase
+      .from("dispatch_resets")
+      .select("reset_at")
+      .order("reset_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const returnedResult = await supabase
+      .from("returned_consumables")
+      .select("*")
+      .order("returned_date", { ascending: false })
+      .order("created_at", { ascending: false });
 
     if (ordersResult.error) setError(ordersResult.error.message);
     if (!ordersResult.error) setOrders(ordersResult.data || []);
+    if (!resetResult.error && resetResult.data?.reset_at) {
+      setSince(resetResult.data.reset_at);
+    } else {
+      setSince(startOfTodayIso());
+    }
+    if (!returnedResult.error) setReturnedConsumables(returnedResult.data || []);
 
     if (!equipmentResult.error) {
       const master = {};
@@ -862,6 +887,83 @@ if (geocode?.status === "success" && geocode?.lat != null && geocode?.lng != nul
   }));
 }
 
+  async function addReturnedConsumable(record) {
+    const payload = {
+      customer_name: record.customer_name.trim(),
+      item_description: record.item_description.trim(),
+      returned_date: record.returned_date || new Date().toISOString().slice(0, 10),
+      staff_name: staff,
+      notes: (record.notes || "").trim(),
+      created_at: new Date().toISOString(),
+    };
+
+    if (!payload.customer_name || !payload.item_description || !payload.returned_date) {
+      setError("Please complete customer, returned item and date.");
+      return false;
+    }
+
+    if (supabase) {
+      const result = await supabase
+        .from("returned_consumables")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (result.error) {
+        setError(result.error.message);
+        return false;
+      }
+
+      setReturnedConsumables((prev) => [result.data, ...prev]);
+    } else {
+      setReturnedConsumables((prev) => [
+        {
+          ...payload,
+          id:
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `return-${Date.now()}`,
+        },
+        ...prev,
+      ]);
+    }
+
+    setShowReturnForm(false);
+    return true;
+  }
+
+  function exportReturnedConsumablesCsv() {
+    const headers = ["Date", "Staff", "Customer", "Returned item", "Notes", "Created at"];
+    const escapeCsv = (value) => {
+      const valueText = String(value ?? "");
+      if (/[",\n\r]/.test(valueText)) return `"${valueText.replaceAll('"', '""')}"`;
+      return valueText;
+    };
+
+    const rows = returnedConsumables.map((item) => [
+      item.returned_date || "",
+      item.staff_name || "",
+      item.customer_name || "",
+      item.item_description || "",
+      item.notes || "",
+      item.created_at || "",
+    ]);
+
+    const csv = [headers, ...rows]
+      .map((row) => row.map(escapeCsv).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `returned-consumables-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function resetPeriod() {
     const resetAt = new Date().toISOString();
     setSince(resetAt);
@@ -1066,12 +1168,15 @@ if (supabase && !session) {
             onDeliver={deliverOrder}
             onCourier={markCourier}
             onDelete={deleteOrder}
+            onOpenReturnForm={() => setShowReturnForm(true)}
           />
         ) : tab === "History" ? (
           <HistoryView
             orders={historyOrders}
             filters={historyFilters}
             setFilters={setHistoryFilters}
+            returnedConsumables={returnedConsumables}
+            onExportReturnedConsumables={exportReturnedConsumablesCsv}
           />
         ) : (
           <OrderList
@@ -1104,6 +1209,13 @@ if (supabase && !session) {
           close={() => {
             if (!savingOrder) setShowAdd(false);
           }}
+        />
+      )}
+      {showReturnForm && (
+        <ReturnConsumableSheet
+          staff={staff}
+          onSave={addReturnedConsumable}
+          close={() => setShowReturnForm(false)}
         />
       )}
       {showPhotoImport && (
@@ -2135,7 +2247,7 @@ function PhotoImportSheet({ close, openManualEntry, onExtracted }) {
   );
 }
 
-function HistoryView({ orders, filters, setFilters }) {
+function HistoryView({ orders, filters, setFilters, returnedConsumables = [], onExportReturnedConsumables }) {
   function updateFilter(field, value) {
     setFilters((prev) => ({ ...prev, [field]: value }));
   }
@@ -2163,7 +2275,16 @@ function HistoryView({ orders, filters, setFilters }) {
             <h2 className="text-lg font-black text-slate-950">History</h2>
             <p className="mt-1 text-sm text-slate-500">Search by customer, date, product/model, docket/equipment, or staff.</p>
           </div>
-          <button onClick={clearFilters} className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900">Clear</button>
+          <div className="flex shrink-0 gap-2">
+            <button
+              onClick={onExportReturnedConsumables}
+              disabled={!returnedConsumables.length}
+              className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+            >
+              Export returns
+            </button>
+            <button onClick={clearFilters} className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900">Clear</button>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -2239,6 +2360,7 @@ function MineView({
   onDeliver,
   onCourier,
   onDelete,
+  onOpenReturnForm,
 }) {
   return (
     <div className="space-y-4">
@@ -2269,7 +2391,16 @@ function MineView({
       </section>
 
       <section>
-        <h3 className="mb-2 px-1 text-sm font-black uppercase tracking-wider text-slate-500">My taken deliveries</h3>
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <h3 className="text-sm font-black uppercase tracking-wider text-slate-500">My taken deliveries</h3>
+          <button
+            type="button"
+            onClick={onOpenReturnForm}
+            className="rounded-2xl bg-red-600 px-3 py-2 text-xs font-black text-white shadow-sm active:scale-95"
+          >
+            Record return
+          </button>
+        </div>
         <OrderList
           orders={orders}
           mapProvider={mapProvider}
@@ -2280,6 +2411,57 @@ function MineView({
           onDelete={onDelete}
         />
       </section>
+    </div>
+  );
+}
+
+function ReturnConsumableSheet({ staff, onSave, close }) {
+  const [form, setForm] = useState({
+    customer_name: "",
+    item_description: "",
+    returned_date: new Date().toISOString().slice(0, 10),
+    notes: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  function update(field, value) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    const ok = await onSave(form);
+    if (!ok) setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-slate-950/50 sm:items-center sm:justify-center">
+      <div className="max-h-[92vh] w-full overflow-auto rounded-t-[2rem] border border-slate-200 bg-white p-4 shadow-2xl sm:max-w-xl sm:rounded-[2rem]">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black text-slate-950">Record returned consumables</h2>
+            <p className="mt-1 text-xs text-slate-500">For staff commission records. Staff: {staff}</p>
+          </div>
+          <button onClick={close} disabled={saving} className="rounded-2xl bg-slate-100 p-2 text-slate-700">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-3">
+          <Field label="Customer / Organisation" value={form.customer_name} onChange={(v) => update("customer_name", v)} placeholder="e.g. City Accounting Group" />
+          <Field label="Returned consumables" value={form.item_description} onChange={(v) => update("item_description", v)} placeholder="e.g. 2 x W9060MC Black, 1 x WT-B1" />
+          <Field label="Date" type="date" value={form.returned_date} onChange={(v) => update("returned_date", v)} />
+          <Field label="Notes" value={form.notes} onChange={(v) => update("notes", v)} placeholder="Optional" />
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button onClick={close} disabled={saving} className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black text-slate-900 disabled:bg-slate-100 disabled:text-slate-400">Cancel</button>
+          <button type="button" disabled={saving || !form.customer_name.trim() || !form.item_description.trim()} onClick={handleSave} className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">
+            {saving ? "Saving..." : "Save return"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
