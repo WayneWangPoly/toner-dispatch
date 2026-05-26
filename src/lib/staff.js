@@ -7,7 +7,7 @@ export const STAFF = [
   'Ivan',
   'James',
   'Laurinda',
-  'Nikil',
+  'Nikhil',
 ];
 
 export function staffEmail(name) {

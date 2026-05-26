@@ -22,7 +22,7 @@ const MAX_MAP_ZOOM = 14;
 const TILE_SIZE = 256;
 
 const directionOptions = ["CBD", "East", "South", "West", "North", "Far North", "Far South", "Southeast", "Southwest", "Northeast", "Northwest"];
-const staffOptions = ["Aaron", "Amanda", "Bradley", "Chen", "Henry", "Ivan", "James", "Laurinda", "Nikil"];
+const staffOptions = ["Aaron", "Amanda", "Bradley", "Chen", "Henry", "Ivan", "James", "Laurinda", "Nikhil"];
 const mapProviderOptions = ["Google Maps", "Apple Maps", "Waze"];
 
 function getStoredPreference(key, fallback) {
