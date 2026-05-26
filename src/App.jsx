@@ -510,7 +510,7 @@ useEffect(() => {
     if (!resetResult.error && resetResult.data?.reset_at) {
       setSince(resetResult.data.reset_at);
     } else {
-      setSince(startOfTodayIso());
+      setSince(defaultPeriodStartIso());
     }
     if (!returnedResult.error) setReturnedConsumables(returnedResult.data || []);
 
