@@ -362,7 +362,7 @@ export default function TonerDispatchMVP() {
   const [showAdd, setShowAdd] = useState(false);
   const [showPhotoImport, setShowPhotoImport] = useState(false);
   const [showReturnForm, setShowReturnForm] = useState(false);
-  const [since, setSince] = useState(() => startOfTodayIso());
+  const [since, setSince] = useState(() => defaultPeriodStartIso());
   const [error, setError] = useState("");
   const [form, setForm] = useState(emptyForm());
   const [savingOrder, setSavingOrder] = useState(false);
