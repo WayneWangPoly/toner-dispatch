@@ -536,7 +536,7 @@ useEffect(() => {
     };
     const scoped = orders.filter(inCurrentPeriod);
     const waiting = scoped.filter((o) => o.status === "Waiting");
-    const taken = scoped.filter((o) => o.status === "Taken");
+    const taken = scoped.filter((o) => o.taken_at && o.taken_by && o.taken_by !== "Courier");
     const internal = scoped.filter((o) => o.status === "Delivered" && o.taken_by && o.taken_by !== "Courier");
     const courier = scoped.filter((o) => o.status === "Courier");
     const aging = waiting.filter((o) => o.priority === "High" || waitingDays(o.created_at) >= 5);
