@@ -1917,13 +1917,13 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
                 <div className="mt-1 text-[10px] font-black uppercase text-slate-500">{locationStatusLabel(order)}</div>
                 <div className="mt-1 text-xs text-slate-600">{waitingDays(order.created_at)} days · {order.status}</div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button type="button" onPointerDown={stopMapPointer} onPointerUp={(e) => { stopMapPointer(e); openNavigation(order, mapProvider, suppressNavigationPrompt); }} className="col-span-2 flex items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black text-slate-900"><Navigation className="h-3 w-3" /> Navigate</button>
+                  <button type="button" onPointerDown={stopMapPointer} onClick={(e) => { stopMapPointer(e); openNavigation(order, mapProvider, suppressNavigationPrompt); }} className="col-span-2 flex items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black text-slate-900"><Navigation className="h-3 w-3" /> Navigate</button>
                   {order.status === "Waiting" ? (
                     <>
                       <button
                         type="button"
                         onPointerDown={stopMapPointer}
-                        onPointerUp={(e) => { stopMapPointer(e); handleTake(order.id); }}
+                        onClick={(e) => { stopMapPointer(e); handleTake(order.id); }}
                         className="rounded-xl bg-red-600 px-2 py-2 text-xs font-black text-white"
                       >
                         Take
@@ -1931,7 +1931,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
                       <button
                         type="button"
                         onPointerDown={stopMapPointer}
-                        onPointerUp={(e) => { stopMapPointer(e); handleCourier(order); }}
+                        onClick={(e) => { stopMapPointer(e); handleCourier(order); }}
                         className="rounded-xl bg-slate-900 px-2 py-2 text-xs font-black text-white"
                       >
                         Courier
@@ -1941,7 +1941,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
                     <button
                       type="button"
                       onPointerDown={stopMapPointer}
-                      onPointerUp={(e) => { stopMapPointer(e); handleDelivered(order); }}
+                      onClick={(e) => { stopMapPointer(e); handleDelivered(order); }}
                       className="col-span-2 rounded-xl bg-slate-950 px-2 py-2 text-xs font-black text-white"
                     >
                       Delivered
