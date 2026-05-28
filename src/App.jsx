@@ -1931,7 +1931,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
                       <button
                         type="button"
                         onPointerDown={stopMapPointer}
-                        onPointerUp={(e) => { stopMapPointer(e); handleCourier(order.id); }}
+                        onPointerUp={(e) => { stopMapPointer(e); handleCourier(order); }}
                         className="rounded-xl bg-slate-900 px-2 py-2 text-xs font-black text-white"
                       >
                         Courier
