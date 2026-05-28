@@ -1877,7 +1877,7 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
     setOpenMarkerKey(null);
   }
 
-  function handleCourier(id) {
+  function handleCourier(order) {
     onCourier(id);
     setOpenMarkerKey(null);
   }
