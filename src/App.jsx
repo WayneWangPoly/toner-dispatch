@@ -1759,6 +1759,7 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
+        onClick={() => setOpenMarkerKey(null)}
         style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" }}
       >
         <div className="absolute left-3 top-3 z-30 grid gap-2">
