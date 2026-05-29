@@ -1633,7 +1633,6 @@ function MapView({ orders, area, mapProvider, suppressNavigationPrompt, onTake, 
 
   function handlePointerDown(event) {
     event.preventDefault();
-    setOpenMarkerKey(null);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     pointersRef.current.set(event.pointerId, pointFromEvent(event));
     const points = Array.from(pointersRef.current.values());
