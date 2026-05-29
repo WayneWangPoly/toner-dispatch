@@ -1900,7 +1900,16 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
         {label}
       </button>
       {open && (
-        <div className="absolute left-3 top-3 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-slate-950 shadow-2xl" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+        <div
+          className="absolute left-3 top-3 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-slate-950 shadow-2xl"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="flex items-start justify-between gap-2">
             <div>
               <div className="text-sm font-black">{group.count > 1 ? `${group.count} orders at this address` : primary.equipment_id}</div>
