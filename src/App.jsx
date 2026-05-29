@@ -1888,7 +1888,12 @@ function MapGroupMarker({ group, left, top, isOpen, setOpenMarkerKey, mapProvide
   }
 
   return (
-    <div className="absolute z-20" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()}>
+    <div
+      className="absolute z-20"
+      style={{ left, top }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         onPointerDown={stopMapEvent}
         onPointerUp={(e) => {
