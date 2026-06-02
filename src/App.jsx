@@ -18,7 +18,7 @@ import LoginScreen from "./components/LoginScreen";
 const ADELAIDE_CENTER = { lat: -34.9285, lng: 138.6007 };
 const MAP_ZOOM = 15;
 const MIN_MAP_ZOOM = 9;
-const MAX_MAP_ZOOM = 19;
+const MAX_MAP_ZOOM = 18;
 const TILE_SIZE = 256;
 
 const directionOptions = ["CBD", "East", "South", "West", "North", "Far North", "Far South", "Southeast", "Southwest", "Northeast", "Northwest"];
