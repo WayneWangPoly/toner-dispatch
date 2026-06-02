@@ -302,34 +302,26 @@ function openNavigation(order, provider, suppressPrompt) {
 }
 
 function addressGroupKey(order) {
-  return [cleanAddress(order.street_address || order.address), normalizeSuburb(order.suburb), order.state || ""].join("|");
-}
+  const lat = Number(order.lat);
+  const lng = Number(order.lng);
 
-function groupOrdersForMap(orders) {
-  const groups = new Map();
-  orders.forEach((order) => {
-    const key = addressGroupKey(order);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(order);
-  });
+  const hasPreciseLocation =
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    ["google_geocode", "manual_override"].includes(order.geocode_source) &&
+    order.geocode_location_type !== "APPROXIMATE";
 
-  return Array.from(groups.entries()).map(([key, group]) => {
-    const first = group[0];
-    const baseLat = toNumber(first.lat, ADELAIDE_CENTER.lat);
-    const baseLng = toNumber(first.lng, ADELAIDE_CENTER.lng);
-    const urgentCount = group.filter((o) => o.priority === "High" || waitingDays(o.created_at) >= 5).length;
-    const takenCount = group.filter((o) => o.status === "Taken").length;
-    return {
-      key,
-      orders: group,
-      primary: first,
-      count: group.length,
-      urgentCount,
-      takenCount,
-      lat: baseLat,
-      lng: baseLng,
-    };
-  });
+  if (hasPreciseLocation) {
+    return `geo|${lat.toFixed(5)}|${lng.toFixed(5)}`;
+  }
+
+  return [
+    "addr",
+    cleanAddress(order.street_address || order.address),
+    normalizeSuburb(order.suburb),
+    (order.state || "").toUpperCase(),
+    order.postcode || "",
+  ].join("|");
 }
 
 function locationStatusLabel(order) {
