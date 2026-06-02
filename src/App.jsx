@@ -304,12 +304,14 @@ function openNavigation(order, provider, suppressPrompt) {
 function addressGroupKey(order) {
   const lat = Number(order.lat);
   const lng = Number(order.lng);
+  const geocodeSource = String(order.geocode_source || "");
+  const locationType = String(order.geocode_location_type || "");
 
   const hasPreciseLocation =
     Number.isFinite(lat) &&
     Number.isFinite(lng) &&
-    ["google_geocode", "manual_override"].includes(order.geocode_source) &&
-    order.geocode_location_type !== "APPROXIMATE";
+    (geocodeSource === "google_geocode" || geocodeSource === "manual_override") &&
+    locationType !== "APPROXIMATE";
 
   if (hasPreciseLocation) {
     return `geo|${lat.toFixed(5)}|${lng.toFixed(5)}`;
@@ -319,8 +321,7 @@ function addressGroupKey(order) {
     "addr",
     cleanAddress(order.street_address || order.address),
     normalizeSuburb(order.suburb),
-    (order.state || "").toUpperCase(),
-    order.postcode || "",
+    order.state || "",
   ].join("|");
 }
 
