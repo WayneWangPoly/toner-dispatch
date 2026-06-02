@@ -42,8 +42,8 @@ function setStoredPreference(key, value) {
 }
 
 const directionFocus = {
-  All: { lat: -34.9285, lng: 138.6007, zoom: 13 },
-  CBD: { lat: -34.9285, lng: 138.6007, zoom: 14 },
+  All: { lat: -34.9285, lng: 138.6007, zoom: 14 },
+  CBD: { lat: -34.9285, lng: 138.6007, zoom: 16 },
   East: { lat: -34.925, lng: 138.655, zoom: 12 },
   South: { lat: -34.995, lng: 138.555, zoom: 12 },
   West: { lat: -34.895, lng: 138.535, zoom: 12 },
