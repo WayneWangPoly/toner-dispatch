@@ -16,7 +16,7 @@ import LoginScreen from "./components/LoginScreen";
 
 
 const ADELAIDE_CENTER = { lat: -34.9285, lng: 138.6007 };
-const MAP_ZOOM = 12;
+const MAP_ZOOM = 10;
 const MIN_MAP_ZOOM = 9;
 const MAX_MAP_ZOOM = 18;
 const TILE_SIZE = 256;
@@ -42,8 +42,8 @@ function setStoredPreference(key, value) {
 }
 
 const directionFocus = {
-  All: { lat: -34.9285, lng: 138.6007, zoom: 12 },
-  CBD: { lat: -34.9285, lng: 138.6007, zoom: 13 },
+  All: { lat: -34.9285, lng: 138.6007, zoom: 10 },
+  CBD: { lat: -34.9285, lng: 138.6007, zoom: 12 },
   East: { lat: -34.925, lng: 138.655, zoom: 12 },
   South: { lat: -34.995, lng: 138.555, zoom: 12 },
   West: { lat: -34.895, lng: 138.535, zoom: 12 },
