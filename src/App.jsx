@@ -471,8 +471,11 @@ async function geocodeAddressWithGoogle(address) {
     setAuthLoading(false);
   });
 
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+  supabase.auth.onAuthStateChange((event, session) => {
     setSession(session);
+    if (event === "PASSWORD_RECOVERY") {
+      setPasswordRecovery(true);
+    }
 
     if (!session) {
       localStorage.removeItem("toner_staff_name");
