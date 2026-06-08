@@ -342,6 +342,7 @@ function locationStatusLabel(order) {
 
 export default function TonerDispatchMVP() {
   const [session, setSession] = useState(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
 
   const [orders, setOrders] = useState(demoOrders);
