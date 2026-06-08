@@ -466,25 +466,64 @@ async function geocodeAddressWithGoogle(address) {
     return;
   }
 
-  supabase.auth.getSession().then(({ data }) => {
-    setSession(data.session);
-    setAuthLoading(false);
-  });
+  let active = true;
 
-  supabase.auth.onAuthStateChange((event, session) => {
-    setSession(session);
+  async function clearLocalLogin() {
+    if (!active) return;
+    setSession(null);
+    localStorage.removeItem("toner_staff_name");
+    setStaff("Aaron");
+  }
+
+  async function approveSession(nextSession) {
+    if (!nextSession?.user?.id) {
+      await clearLocalLogin();
+      return;
+    }
+
+    const { data: profile, error } = await supabase
+      .from("app_user_profiles")
+      .select("id, staff_name, role, approved, disabled_at")
+      .eq("id", nextSession.user.id)
+      .maybeSingle();
+
+    if (error || !profile?.approved || profile?.disabled_at) {
+      await supabase.auth.signOut();
+      await clearLocalLogin();
+      return;
+    }
+
+    if (!active) return;
+
+    const approvedStaffName = profile.staff_name || "Aaron";
+    setSession(nextSession);
+    setStaff(approvedStaffName);
+    localStorage.setItem("toner_staff_name", approvedStaffName);
+  }
+
+  async function loadInitialSession() {
+    const { data } = await supabase.auth.getSession();
+    await approveSession(data.session);
+    if (active) setAuthLoading(false);
+  }
+
+  loadInitialSession();
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event, nextSession) => {
     if (event === "PASSWORD_RECOVERY") {
       setPasswordRecovery(true);
+      setAuthLoading(false);
+      return;
     }
 
-    if (!session) {
-      localStorage.removeItem("toner_staff_name");
-      setStaff("Aaron");
-    }
+    approveSession(nextSession);
   });
 
   return () => {
-    data.subscription.unsubscribe();
+    active = false;
+    subscription.unsubscribe();
   };
 }, []);
 
