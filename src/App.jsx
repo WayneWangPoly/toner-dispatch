@@ -528,6 +528,39 @@ async function geocodeAddressWithGoogle(address) {
   }
 
   async function loadInitialSession() {
+    let shouldForceRelogin = false;
+
+    try {
+      shouldForceRelogin =
+        localStorage.getItem("toner_auth_reset_version") !== AUTH_RESET_VERSION;
+    } catch {
+      shouldForceRelogin = true;
+    }
+
+    if (shouldForceRelogin) {
+      try {
+        localStorage.setItem("toner_auth_reset_version", AUTH_RESET_VERSION);
+      } catch {
+        // Ignore storage errors.
+      }
+
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch {
+        // Ignore sign-out errors. We still clear local auth storage below.
+      }
+
+      clearSupabaseAuthStorageOnce();
+
+      if (active) {
+        setSession(null);
+        setStaff("Aaron");
+        setAuthLoading(false);
+      }
+
+      return;
+    }
+
     const { data } = await supabase.auth.getSession();
     await approveSession(data.session);
     if (active) setAuthLoading(false);
