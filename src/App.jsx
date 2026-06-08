@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { supabase, SUPABASE_URL } from "./lib/supabaseClient";
 import LoginScreen from "./components/LoginScreen";
+import PasswordRecoveryScreen from "./components/PasswordRecoveryScreen";
 
 
 const ADELAIDE_CENTER = { lat: -34.9285, lng: 138.6007 };
