@@ -16,6 +16,32 @@ import LoginScreen from "./components/LoginScreen";
 import PasswordRecoveryScreen from "./components/PasswordRecoveryScreen";
 
 
+const AUTH_RESET_VERSION = "20260609-force-all-users-relogin-v1";
+
+function clearSupabaseAuthStorageOnce() {
+  try {
+    const keysToRemove = [];
+
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+
+      if (
+        key.startsWith("sb-") ||
+        key.includes("supabase") ||
+        key.includes("auth-token") ||
+        key === "toner_staff_name"
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // Ignore storage cleanup errors.
+  }
+}
+
 const ADELAIDE_CENTER = { lat: -34.9285, lng: 138.6007 };
 const MAP_ZOOM = 10;
 const MIN_MAP_ZOOM = 9;
