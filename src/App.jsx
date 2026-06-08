@@ -345,7 +345,7 @@ export default function TonerDispatchMVP() {
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
 
-  const [orders, setOrders] = useState(demoOrders);
+  const [orders, setOrders] = useState(() => (supabase ? [] : demoOrders));
   const [equipment, setEquipment] = useState({});
   const [returnedConsumables, setReturnedConsumables] = useState([]);
   const [loading, setLoading] = useState(Boolean(supabase));
