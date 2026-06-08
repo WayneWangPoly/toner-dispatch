@@ -175,7 +175,7 @@ export default function LoginScreen({ onLogin }) {
                 value={inviteCode}
                 onChange={(event) => setInviteCode(event.target.value)}
                 autoComplete="one-time-code"
-                placeholder="e.g. BBCD-AARON-2026"
+                placeholder=""
                 className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-950 outline-none placeholder:text-slate-400 focus:border-red-500"
               />
             </label>
