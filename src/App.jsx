@@ -1069,6 +1069,17 @@ if (geocode?.status === "success" && geocode?.lat != null && geocode?.lng != nul
   );
 }
 
+if (passwordRecovery) {
+  return (
+    <PasswordRecoveryScreen
+      onDone={async () => {
+        setPasswordRecovery(false);
+        await supabase.auth.signOut();
+      }}
+    />
+  );
+}
+  
 if (supabase && !session) {
   return (
     <LoginScreen
